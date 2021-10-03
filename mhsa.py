@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 
+
 # class MHSA_layer(nn.Module):
 #     '''
 #     multi head self attention layer.
@@ -57,12 +58,11 @@ from torch import nn
 #             return self.mix_heads(torch.cat([block.forward(X) for block in self.blocks], dim=2))
 
 
-
-
 class Gelu(nn.Module):
     '''
     gelu function. returns x∗Φ(x) where Φ(x) is the Cumulative Distribution Function for Gaussian Distribution.
     '''
+
     def __init__(self):
         super(Gelu, self).__init__()
         self.gaussian = torch.distributions.normal.Normal(0, 1)
@@ -75,6 +75,7 @@ class rff(nn.Module):
     '''
     row wise feed forward network
     '''
+
     def __init__(self, input_dim, hidden_layers):
         super(rff, self).__init__()
         self.model = nn.Sequential()
@@ -85,13 +86,12 @@ class rff(nn.Module):
             self.model.add_module(f'gelu_layer_{i + 1}', module=Gelu())
         self.model.add_module('final_layer', module=nn.Linear(input_dim * 4, input_dim))
 
-
     def forward(self, input):
         return self.model.forward(input)
 
 
 class MHSA(nn.Module):
-    def __init__(self, input_dim, rff_layers, head_num,h,drop_out, device):
+    def __init__(self, input_dim, rff_layers, head_num, h, drop_out, device):
         '''
         :param input_dim: network input dim
         :param rff_layers: number of layers in the row wise feed forward network
@@ -109,7 +109,7 @@ class MHSA(nn.Module):
         self.mix_heads = nn.Linear(input_dim, input_dim)
         self.device = device
         self.softmax = nn.Softmax(dim=2)
-        self.split_dim = input_dim//head_num
+        self.split_dim = input_dim // head_num
         if drop_out == None:
             self.drop_out = None
         else:
@@ -117,21 +117,21 @@ class MHSA(nn.Module):
         self.h = h
         self.to(self.device)
 
-
-    def forward(self,input):
+    def forward(self, input):
         # layer normalization
         input = self.ln_0(input)
         # residual branch
         X_res = self.res(input)
         # keys, queries and values of the heads
-        K = torch.cat(torch.split(self.keys(input),self.split_dim,2),0)
-        Q = torch.cat(torch.split(self.queries(input),self.split_dim,2),0)
-        V = torch.cat(torch.split(self.values(input),self.split_dim,2),0)
-        A = self.softmax(torch.einsum('ijl,ikl->ijk', Q, K)/(self.h**0.5))
+        K = torch.cat(torch.split(self.keys(input), self.split_dim, 2), 0)
+        Q = torch.cat(torch.split(self.queries(input), self.split_dim, 2), 0)
+        V = torch.cat(torch.split(self.values(input), self.split_dim, 2), 0)
+        # vhvh
+        A = self.softmax(torch.einsum('ijl,ikl->ijk', Q, K) / (self.h ** 0.5))
         if self.drop_out != None:
             A = self.drop_out(A)
         multihead = A.bmm(V)
-        multihead = torch.cat(multihead.split(input.size(0),0),2)
+        multihead = torch.cat(multihead.split(input.size(0), 0), 2)
         # mix heads
         H = self.mix_heads(multihead)
         if self.drop_out != None:
@@ -139,13 +139,10 @@ class MHSA(nn.Module):
         H = H + X_res
         # layer normalization
         H_rff = self.ln_1(H)
-        return H +self.rff(H_rff)
+        return H + self.rff(H_rff)
         # output = self.res(input) + self.MHSelfAtt(self.ln(v))
         # return output + self.rff(self.ln(output))
         # #return self.just_residuals(input).add(self.rff(self.ln(self.pre_rff(input))))
-
-
-
 
 # class MHSelfAtt_test(nn.Module):
 #     '''
