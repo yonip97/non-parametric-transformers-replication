@@ -126,7 +126,6 @@ class MHSA(nn.Module):
         K = torch.cat(torch.split(self.keys(input), self.split_dim, 2), 0)
         Q = torch.cat(torch.split(self.queries(input), self.split_dim, 2), 0)
         V = torch.cat(torch.split(self.values(input), self.split_dim, 2), 0)
-        # vhvh
         A = self.softmax(torch.einsum('ijl,ikl->ijk', Q, K) / (self.h ** 0.5))
         if self.drop_out != None:
             A = self.drop_out(A)
