@@ -81,8 +81,8 @@ class base_dataset():
         feature_mask = feature_mask.reshape(features.shape)
         flat_labels = labels.flatten()
         labels_mask = np.full(flat_labels.shape,1)
-        mask_labels = np.random.choice(a=[0,1], size=np.count_nonzero(~np.isnan(flat_labels)),
-                                       p=[self.p.l_uc,self.p.l_mo])
+        mask_labels = np.random.choice(a=[0,1,2], size=np.count_nonzero(~np.isnan(flat_labels)),
+                                       p=[self.p.l_uc,self.p.l_mo,self.p.l_r])
         labels_mask[~np.isnan(flat_labels)] = mask_labels
         labels_mask = labels_mask.reshape(labels.shape)
         features[feature_mask == 1] = 0
@@ -130,7 +130,7 @@ class base_dataset():
 
 
 class income_dataset(base_dataset):
-    def __init__(self,embedding_dim = 64,p = probs(0.15,0.9,0.15)):
+    def __init__(self,embedding_dim = 64,p = probs(0.15,0.15)):
         path = '/data/shared-data/UCI-income/income_data/census-income.csv'
         df = pd.read_csv(path)
         self.split = {'train': 0.57, 'val': 0.1, 'test': 0.33}
@@ -146,7 +146,7 @@ class income_dataset(base_dataset):
 
 
 class poker_dataset(base_dataset):
-    def __init__(self,embedding_dim = 64,p = probs(0.15,0.9,0.15)):
+    def __init__(self,embedding_dim = 64,p = probs(0.15,0.15)):
         path = '/data/shared-data/UCI-income/poker_hand/poker-hand-testing.data'
         poker_1 = pd.read_csv(path,header=None)
         path = '/data/shared-data/UCI-income/poker_hand/poker-hand-training-true.data'
@@ -166,7 +166,7 @@ class poker_dataset(base_dataset):
 
 
 class boson_housing_dataset(base_dataset):
-    def __init__(self,embedding_dim = 64,p = probs(0.15,0.9,0.15)):
+    def __init__(self,embedding_dim = 64,p = probs(0.15,0.15)):
         features,labels = load_boston(return_X_y=True)
         data = np.hstack((features, labels.reshape((-1, 1))))
         df = pd.DataFrame(data)
@@ -184,7 +184,7 @@ class boson_housing_dataset(base_dataset):
 
 
 class forest_cover_dataset(base_dataset):
-    def __init__(self,embedding_dim = 64,p = probs(0.15,0.9,0.15)):
+    def __init__(self,embedding_dim = 64,p = probs(0.15,0.15)):
         path = '/data/shared-data/UCI-income/forest_cover/covtype.data.gz'
         df = pd.read_csv(path, compression='gzip', header=None)
         self.split = {'train': 0.7, 'val': 0.1, 'test': 0.2}
@@ -197,7 +197,7 @@ class forest_cover_dataset(base_dataset):
         self.p = p
 
 class higgs_boston_dataset(base_dataset):
-    def __init__(self,embedding_dim = 64,p = probs(0.15,0.9,0.15)):
+    def __init__(self,embedding_dim = 64,p = probs(0.15,0.15)):
         path = '/data/shared-data/UCI-income/boston_higgs/HIGGS.csv.gz'
         df = pd.read_csv(path,compression='gzip',header=None)
         temp = df.pop(0)
@@ -215,7 +215,7 @@ class higgs_boston_dataset(base_dataset):
 
 
 class kick_dataset(base_dataset):
-    def __init__(self,embedding_dim = 64,p = probs(0.15,0.9,0.15)):
+    def __init__(self,embedding_dim = 64,p = probs(0.15,0.15)):
         path = '/data/shared-data/UCI-income/kick/kick.csv'
         df = pd.read_csv(path,header=None,skiprows=1)
         temp = df.pop(0)
@@ -233,7 +233,7 @@ class kick_dataset(base_dataset):
         self.p = p
 
 class breast_cancer_dataset(base_dataset):
-    def __init__(self,embedding_dim = 64,p = probs(0.15,0.9,0.15)):
+    def __init__(self,embedding_dim = 64,p = probs(0.15,0.15)):
         features,labels = load_breast_cancer(return_X_y=True)
         data = np.hstack((features,labels.reshape(-1,1)))
         df = pd.DataFrame(data)
@@ -250,7 +250,7 @@ class breast_cancer_dataset(base_dataset):
         self.p = p
 
 class protein_dataset(base_dataset):
-    def __init__(self,embedding_dim = 64, p = probs(0.15,0.9,0.15)):
+    def __init__(self,embedding_dim = 64, p = probs(0.15,0.15)):
         path = '/data/shared-data/UCI-income/protein/protein.csv'
         df = pd.read_csv(path)
         temp = df.pop('RMSD')
@@ -265,7 +265,7 @@ class protein_dataset(base_dataset):
         self.p = p
 
 class concrete_dataset(base_dataset):
-    def __init__(self,embedding_dim = 64, p = probs(0.15,0.9,0.15)):
+    def __init__(self,embedding_dim = 64, p = probs(0.15,0.15)):
         path = '/data/shared-data/UCI-income/concrete/concrete_data.csv'
         df = pd.read_csv(path)
         self.split = {'train': 0.7, 'val': 0.1, 'test': 0.2}
@@ -279,7 +279,7 @@ class concrete_dataset(base_dataset):
         self.p = p
 
 class yacht_dataset(base_dataset):
-    def __init__(self,embedding_dim = 64, p = probs(0.15,0.9,0.15)):
+    def __init__(self,embedding_dim = 64, p = probs(0.15,0.15)):
         path = '/data/shared-data/UCI-income/yacht/yacht_hydrodynamics.data'
         df = pd.read_fwf(path,header = None)
         categorical_cols = np.arange(5)

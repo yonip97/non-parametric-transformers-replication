@@ -15,15 +15,15 @@ class Reshape(nn.Module):
         return X.reshape(X.size(1),-1,self.E)
 
 class probs():
-    def __init__(self, p_features,features_mask_out,p_labels):
+    def __init__(self, p_features,p_labels):
         assert 0 <= p_labels <= 1
         assert 0 <= p_features <= 1
-        assert 0 <= features_mask_out <= 1
-        self.f_mo = p_features * features_mask_out
-        self.f_r = (1 - features_mask_out) * p_features
+        self.f_mo = p_features * 0.9
+        self.f_r = 0.1 * p_features
         self.f_uc = 1 - self.f_r - self.f_mo
-        self.l_mo = p_labels
-        self.l_uc = 1 - self.l_mo
+        self.l_mo = p_labels * 0.9
+        self.l_r = p_labels * 0.1
+        self.l_uc = 1 - self.l_mo - self.l_r
 
 class Input_Embbeding(nn.Module):
     def __init__(self, categorical: dict, continuous, embedding_dim, device):

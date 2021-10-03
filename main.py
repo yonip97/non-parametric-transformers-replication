@@ -16,7 +16,7 @@ from training_constractor import *
 from util import probs
 
 def main():
-    p = probs(0.15,0.9,0.1)
+    p = probs(0.15,0.9,1)
     data = breast_cancer_dataset(embedding_dim=32,p = p)
     device = 'cpu'
     if torch.cuda.is_available():
