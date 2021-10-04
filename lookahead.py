@@ -79,8 +79,6 @@ class Lookahead(Optimizer):
         param_group["counter"] = 0
         self.optimizer.add_param_group(param_group)
 
-    def clip_gradient(self, model, clip):
-        clip_grad_norm_(model.parameters(), clip)
 
     def flat_then_anneal(self):
         if self.flat_steps <= self.steps_taken  and self.steps_taken <=self.max_steps:

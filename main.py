@@ -16,7 +16,7 @@ from training_constractor import *
 from util import probs
 
 def main():
-    p = probs(0.15,0.9,1)
+    p = probs(0.15,0.1)
     data = breast_cancer_dataset(embedding_dim=32,p = p)
     device = 'cpu'
     if torch.cuda.is_available():
@@ -33,25 +33,23 @@ def main():
     model_heads = 8
     rff_layers = 1
     drop_out = 0.1
-    batch_size = 1000
+    batch_size = -1
     cv = 10
-    init_loss_tradeoff = 1
-    nlls = []
+    init_tradeoff = 1
     finalize = False
-    for i in range(cv):
-        data.next()
-        model = NPT(data.categorical, data.continuous, data.embedding_dim, data.input_dim,model_layers ,model_heads,rff_layers,data.h,device,drop_out,finalize)
-        loss_function = Loss(data,max_steps,init_loss_tradeoff)
-        optimizer = Lamb(model.parameters(),lr = lr,betas=betas,eps=eps)
-        lookahead = Lookahead(optimizer,max_steps=max_steps,flat_proportion=flat,k = k,alpha=alpha)
-        #train(data,model,Epochs,lookahead,1024,loss_function,acc,1,True,1)
-        cv_nll = train_model(data,model,Epochs,lookahead,batch_size,loss_function,nll(),100,1,True,True)
-        nlls.append(cv_nll)
-        print(i)
-    nlls = np.array((nlls))
-    print(nlls)
-    print(f"mean of nlls is {np.mean(nlls)}")
-    print(f"std of nlls is {nlls.std()}")
+    params_dict = {'max_steps':max_steps,'lr':lr,'betas':betas,'eps':eps,'flat':flat,'k':k,'alpha':alpha,'model_layers':model_layers,'rff':rff_layers,'heads':model_heads,'drop':drop_out,'init_tradeoff':init_tradeoff,'finalize':finalize}
+    trainer = Trainer(params_dict,nll(),100,device,1)
+    trainer.run_training(data,batch_size,10)
+    # model = NPT(data.categorical, data.continuous, data.embedding_dim, data.input_dim,model_layers ,model_heads,rff_layers,data.h,device,drop_out,finalize)
+    # loss_function = Loss(data,max_steps,init_loss_tradeoff)
+    # optimizer = Lamb(model.parameters(),lr = lr,betas=betas,eps=eps)
+    # lookahead_optimizer = Lookahead(optimizer,max_steps=max_steps,flat_proportion=flat,k = k,alpha=alpha)
+    # Trainer()
+    # trainer = Trainer(model,lookahead_optimizer,loss_function,nll(),100,device,1)
+    # test_evals = trainer.run_training(data,max_steps,batch_size,cv)
+    # print(test_evals)
+    # print(f"mean of nlls is {np.mean(test_evals)}")
+    # print(f"std of nlls is {test_evals.std()}")
     #duplicate_test(data,model,Epochs,lookahead,2048,loss_function,acc,1,True,1)
     # #flat = Flat_then_Anneal_Scheduler(optimizer,200000,1,0.7)
     # for epoch in range(Epochs):

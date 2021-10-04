@@ -37,9 +37,9 @@ class NPT(nn.Module):
             embedded_input = self.input_embedding(X,M)
         network_output = self.network.forward(embedded_input)
         if self.drop_out is not None:
-              output =  {key:self.drop_out(value)for key,value in self.output_embedding(network_output).items()}
+              output = {key:self.drop_out(value)for key,value in self.output_embedding(network_output).items()}
         else:
-              output =  self.output_embedding(network_output)
+              output = self.output_embedding(network_output)
         if self.finalize and not self.training:
             return torch.stack([x[1] for x in sorted(output.items())],dim=1)
         else:

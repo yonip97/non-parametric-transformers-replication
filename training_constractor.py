@@ -6,8 +6,117 @@ import time
 import torch.utils.data as utils_data
 import numpy as np
 from evaluation_metrics import *
-from util import permute
+from util import permute,gradient_clipper
+import math
+from npt import  NPT
+from loss import Loss
+from lookahead import Lookahead
+from lamb import Lamb
+class Trainer():
+    def __init__(self,params_dict,eval_metric,eval_every_n_th_epoch,device,clip = None,lr_scheduler = 'flat_then_anneal',tradeoff_scheduler = 'cosine'):
+        self.params = params_dict
+        self.eval_metric = eval_metric
+        self.eval_steps = eval_every_n_th_epoch
+        if clip != None:
+            self.clip = gradient_clipper(clip)
+        else:
+            self.clip = None
+        self.lr_scheduler = lr_scheduler
+        self.tradeoff_scheduler = tradeoff_scheduler
+        self.device = device
 
+
+    def build_npt(self,data):
+        self.model = NPT(data.categorical,data.continuous,data.embedding_dim,data.input_dim,self.params['model_layers'],self.params['heads'],self.params['rff'],data.h,self.device,self.params['drop'],self.params['finalize'])
+    def build_loss(self,data):
+        self.loss_function =  Loss(data,self.params['max_steps'],self.params['init_tradeoff'])
+    def build_optimizer(self):
+        lamb_optimizer = Lamb(self.model.parameters(), self.params['lr'], self.params['betas'], self.params['eps'])
+        lookahead_optimizer = Lookahead(lamb_optimizer, self.params['max_steps'], self.params['flat'], self.params['k'], self.params['alpha'])
+        self.optimizer = lookahead_optimizer
+
+    def get_epochs(self,data,max_steps,batch_size):
+        if batch_size == -1:
+            return max_steps,len(data.train_data)
+        else:
+            steps_per_epoch = math.ceil(len(data.train_data)/batch_size)
+            epochs = math.ceil(max_steps/ steps_per_epoch)
+            return epochs,batch_size
+
+    def run_training(self,data,batch_size,cv = None):
+        if cv == None:
+            self.build_npt(data)
+            self.build_optimizer()
+            self.build_loss(data)
+            self.train(data,batch_size)
+            test_eval = self.test(data)
+            print(f"The evaluation metric loss on the test set is {test_eval}")
+            return test_eval
+        else:
+            test_evals = []
+            for i in range(cv):
+                data.next()
+                self.build_npt(data)
+                self.build_optimizer()
+                self.build_loss(data)
+                self.train(data,batch_size)
+                test_eval = self.test(data)
+                print(f"The evaluation metric loss on the test set is {test_eval}")
+                test_evals.append(test_eval)
+            return np.array(test_evals)
+
+    def train(self,data,batch_size):
+        epochs,batch_size = self.get_epochs(data,self.params['max_steps'],batch_size)
+        for epoch in range(1,epochs+1):
+            X, M = data.create_mask()
+            train = utils_data.TensorDataset(X.to(self.device), M.to(self.device),
+                    torch.tensor(data.train_data, requires_grad=False, dtype=torch.float).to(self.device))
+            train_loader = utils_data.DataLoader(train, batch_size=batch_size, shuffle=True)
+            for batch_data in train_loader:
+                batch_X, batch_M, batch_real_data = batch_data
+                z = self.model.forward(batch_X, batch_M)
+                batch_loss = self.loss_function.compute(z, batch_real_data, batch_M)
+                batch_loss.backward()
+                if self.clip != None:
+                    self.clip.clip_gradient(self.model)
+                self.optimizer.step()
+                if self.lr_scheduler == 'flat_then_anneal':
+                    self.optimizer.flat_then_anneal()
+                if self.tradeoff_scheduler == 'cosine':
+                    self.loss_function.Scheduler_cosine_step()
+                self.optimizer.zero_grad()
+            if epoch % self.eval_steps == 0:
+                eval_loss = self.evaluate(data)
+                print(f"The evaluation metric loss on the validation set is {eval_loss} after {epoch} epochs")
+                    
+    def evaluate(self,data):
+        self.model.eval()
+        true_labels = np.concatenate((data.train_data[:, -1], data.val_data[:, -1]))
+        eval_X, eval_M = data.mask_targets('val')
+        z = self.model.forward(eval_X.to(self.device), eval_M.to(self.device))
+        if self.model.finalize:
+            pred = z[:, -1].detach().cpu()
+            # eval_acc = acc.compute(pred, true_labels, eval_M[:, -1])
+        else:
+            pred = z[data.target_col].detach().cpu()
+            # eval_acc = acc.compute(pred,true_labels,eval_M[:,-1])
+        eval_loss = self.eval_metric.compute(pred, true_labels, eval_M[:, -1])
+        self.model.train()
+        return eval_loss
+    def test(self,data):
+        self.model.eval()
+        X_test, M_test = data.mask_targets('test')
+        true_labels = np.concatenate((data.train_data[:, -1], data.val_data[:, -1], data.test_data[:, -1]))
+        z = self.model.forward(X_test.to(self.device), M_test.to(self.device))
+        if self.model.finalize:
+            pred = z[:, -1].detach().cpu()
+            # acc_score = acc.compute(pred[:,-1].detach().cpu(),true_labels,M_test[:,-1])
+        else:
+            pred = z[data.target_col].detach().cpu()
+        nll_score = self.eval_metric.compute(pred, true_labels, M_test[:, -1])
+        # acc_score = acc.compute(pred[data.target_col].detach().cpu(), true_labels, M_test[:, -1])
+        self.model.train()
+        return nll_score
 def train_model(data, model, epochs, optimizer, batch_size, loss_function, eval_metric, eval_each_n_epochs, clip = None, use_lr_scheduler = False, use_tradeoff_scheduler = False):
     device = 'cpu'
     if torch.cuda.is_available():

@@ -36,7 +36,7 @@ class Loss():
         features_loss = torch.sum(torch.stack(list(losses.values())))
         return (1 - self.curr_tradeoff) * label_loss + self.curr_tradeoff * features_loss
 
-    def Scheduler_step(self):
+    def Scheduler_cosine_step(self):
         if self.steps_taken <= self.max_steps:
             self.curr_tradeoff = self.init_tradeoff * (1 / 2) * (
                 np.cos(np.pi * (self.steps_taken / self.max_steps)) + 1)

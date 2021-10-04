@@ -2,6 +2,7 @@ from torch import nn
 import torch
 from torch.nn import functional as F
 import random
+from torch.nn.utils import clip_grad_norm_
 
 class Flatten(nn.Module):
     @staticmethod
@@ -20,10 +21,10 @@ class probs():
         assert 0 <= p_features <= 1
         self.f_mo = p_features * 0.9
         self.f_r = 0.1 * p_features
-        self.f_uc = 1 - self.f_r - self.f_mo
+        self.f_uc = 1 - p_features
         self.l_mo = p_labels * 0.9
         self.l_r = p_labels * 0.1
-        self.l_uc = 1 - self.l_mo - self.l_r
+        self.l_uc = 1 - p_labels
 
 class Input_Embbeding(nn.Module):
     def __init__(self, categorical: dict, continuous, embedding_dim, device):
@@ -139,4 +140,8 @@ def permute(X,i):
     new_M[random_row, -1] = 1
     return new_X,new_M,real_label
 
-
+class gradient_clipper():
+    def __init__(self,clip):
+        self.clip = clip
+    def clip_gradient(self, model):
+        clip_grad_norm_(model.parameters(),self.clip)

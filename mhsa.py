@@ -1,33 +1,33 @@
 import torch
 from torch import nn
+import math
 
+class MHSA_layer(nn.Module):
+    '''
+    multi head self attention layer.
+    '''
+    def __init__(self, input_dim, output_dim,h,drop_out=None):
+        super(MHSA_layer, self).__init__()
+        self.key = nn.Linear(input_dim, output_dim)
+        self.query = nn.Linear(input_dim, output_dim)
+        self.value = nn.Linear(input_dim, output_dim)
+        self.softmax = nn.Softmax(dim=2)
+        if drop_out == None:
+            self.drop_out = None
+        else:
+            self.drop_out = nn.Dropout(p=drop_out)
+        self.h = h
 
-# class MHSA_layer(nn.Module):
-#     '''
-#     multi head self attention layer.
-#     '''
-#     def __init__(self, input_dim, output_dim,h,drop_out=None):
-#         super(MHSA_layer, self).__init__()
-#         self.key = nn.Linear(input_dim, output_dim)
-#         self.query = nn.Linear(input_dim, output_dim)
-#         self.value = nn.Linear(input_dim, output_dim)
-#         self.softmax = nn.Softmax(dim=2)
-#         if drop_out == None:
-#             self.drop_out = None
-#         else:
-#             self.drop_out = nn.Dropout(p=drop_out)
-#         self.h = h
-#
-#     def forward(self, X):
-#         Q = self.query(X)
-#         K = self.key(X)
-#         V = self.value(X)
-#         if self.drop_out is not None and self.training:
-#             #return self.drop_out(self.softmax(torch.einsum('ijl,ikl->ijk', Q, K) / Q.shape[-1]**0.5).bmm(V))
-#             return self.drop_out(self.softmax(Q @ torch.transpose(K, 1, 2) / self.h**0.5) @ V)
-#         else:
-#             #return self.softmax(torch.einsum('ijl,ikl->ijk', Q, K) / Q.shape[-1] ** 0.5).bmm(V)
-#             return self.softmax(Q @ torch.transpose(K, 1, 2) / self.h**0.5) @ V
+    def forward(self, X):
+        Q = self.query(X)
+        K = self.key(X)
+        V = self.value(X)
+        if self.drop_out is not None and self.training:
+            #return self.drop_out(self.softmax(torch.einsum('ijl,ikl->ijk', Q, K) / Q.shape[-1]**0.5).bmm(V))
+            return self.drop_out(self.softmax(Q @ torch.transpose(K, 1, 2) / self.h**0.5) @ V)
+        else:
+            #return self.softmax(torch.einsum('ijl,ikl->ijk', Q, K) / Q.shape[-1] ** 0.5).bmm(V)
+            return self.softmax(Q @ torch.transpose(K, 1, 2) / self.h**0.5) @ V
 #
 
 # class MHSelfAtt(nn.Module):
@@ -102,6 +102,8 @@ class MHSA(nn.Module):
         self.keys = nn.Linear(input_dim, input_dim)
         self.queries = nn.Linear(input_dim, input_dim)
         self.values = nn.Linear(input_dim, input_dim)
+
+        #self.blocks = nn.ModuleList(MHSA_layer(input_dim,input_dim//head_num,h,drop_out)for i in range(head_num))
         self.rff = rff(input_dim, rff_layers)
         self.ln_0 = nn.LayerNorm(input_dim)
         self.ln_1 = nn.LayerNorm(input_dim)
@@ -114,22 +116,26 @@ class MHSA(nn.Module):
             self.drop_out = None
         else:
             self.drop_out = nn.Dropout(p=drop_out)
-        self.h = h
+        self.h = input_dim
         self.to(self.device)
+
+
+
 
     def forward(self, input):
         # layer normalization
-        input = self.ln_0(input)
+        X_multihead = self.ln_0.forward(input)
         # residual branch
-        X_res = self.res(input)
+        X_res = self.res.forward(X_multihead)
         # keys, queries and values of the heads
-        K = torch.cat(torch.split(self.keys(input), self.split_dim, 2), 0)
-        Q = torch.cat(torch.split(self.queries(input), self.split_dim, 2), 0)
-        V = torch.cat(torch.split(self.values(input), self.split_dim, 2), 0)
-        A = self.softmax(torch.einsum('ijl,ikl->ijk', Q, K) / (self.h ** 0.5))
+        K = torch.cat(torch.split(self.keys.forward(input), self.split_dim, 2), 0)
+        Q = torch.cat(torch.split(self.queries.forward(X_multihead), self.split_dim, 2), 0)
+        V = torch.cat(torch.split(self.values.forward(input), self.split_dim, 2), 0)
+        A = self.softmax.forward(torch.einsum('ijl,ikl->ijk', Q, K) / (self.h ** 0.5))
         if self.drop_out != None:
             A = self.drop_out(A)
         multihead = A.bmm(V)
+        #multihead = torch.cat([block.forward(input) for block in self.blocks])
         multihead = torch.cat(multihead.split(input.size(0), 0), 2)
         # mix heads
         H = self.mix_heads(multihead)
@@ -137,8 +143,8 @@ class MHSA(nn.Module):
             H = self.drop_out(H)
         H = H + X_res
         # layer normalization
-        H_rff = self.ln_1(H)
-        return H + self.rff(H_rff)
+        H_rff = self.ln_1.forward(H)
+        return H + self.rff.forward(H_rff)
         # output = self.res(input) + self.MHSelfAtt(self.ln(v))
         # return output + self.rff(self.ln(output))
         # #return self.just_residuals(input).add(self.rff(self.ln(self.pre_rff(input))))
@@ -165,14 +171,3 @@ class MHSA(nn.Module):
 #             self.drop_out = None
 #         self.to(self.device)
 #
-#
-#     def forward(self, X):
-#         keys = torch.cat(self.key(X).split(self.split_dim,2),0)
-#         values = torch.cat(self.value(X).split(self.split_dim,2),0)
-#         queries = torch.cat(self.query(X).split(self.split_dim,2),0)
-#         multihead = self.softmax(queries.bmm(keys.transpose(1, 2)) / self.input_dim**0.5).bmm(values)
-#         return self.mix_heads(torch.cat(multihead.split(X.shape[0],0),2))
-#         # if self.drop_out is not None:
-#         #     return self.drop_out(self.mix_heads(torch.cat([block.forward(X) for block in self.blocks], dim=2)))
-#         # else:
-#         #     return self.mix_heads(torch.cat([block.forward(X) for block in self.blocks], dim=2))
