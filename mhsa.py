@@ -126,7 +126,7 @@ class MHSA(nn.Module):
         # layer normalization
         X_multihead = self.ln_0.forward(input)
         # residual branch
-        X_res = self.res.forward(X_multihead)
+        X_res = self.res.forward(input)
         # keys, queries and values of the heads
         K = torch.cat(torch.split(self.keys.forward(input), self.split_dim, 2), 0)
         Q = torch.cat(torch.split(self.queries.forward(X_multihead), self.split_dim, 2), 0)

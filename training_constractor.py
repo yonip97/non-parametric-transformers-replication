@@ -86,6 +86,8 @@ class Trainer():
                     self.loss_function.Scheduler_cosine_step()
                 self.optimizer.zero_grad()
             if epoch % self.eval_steps == 0:
+                if epoch >= 1000:
+                    print("hey")
                 eval_loss = self.evaluate(data)
                 print(f"The evaluation metric loss on the validation set is {eval_loss} after {epoch} epochs")
                     
