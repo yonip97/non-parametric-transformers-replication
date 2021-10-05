@@ -130,7 +130,7 @@ class base_dataset():
 
 
 class income_dataset(base_dataset):
-    def __init__(self,embedding_dim = 64,p = probs(0.15,0.15)):
+    def __init__(self,embedding_dim = 64,p = probs(0.15,0.15),cv = None):
         path = '/data/shared-data/UCI-income/income_data/census-income.csv'
         df = pd.read_csv(path)
         self.split = {'train': 0.57, 'val': 0.1, 'test': 0.33}
@@ -141,12 +141,14 @@ class income_dataset(base_dataset):
         self.h = 42
         self.target_type = 'categorical'
         self.p = p
+        if cv !=None:
+            self._cv_split(cv)
 
 
 
 
 class poker_dataset(base_dataset):
-    def __init__(self,embedding_dim = 64,p = probs(0.15,0.15)):
+    def __init__(self,embedding_dim = 64,p = probs(0.15,0.15),cv = None):
         path = '/data/shared-data/UCI-income/poker_hand/poker-hand-testing.data'
         poker_1 = pd.read_csv(path,header=None)
         path = '/data/shared-data/UCI-income/poker_hand/poker-hand-training-true.data'
@@ -162,11 +164,13 @@ class poker_dataset(base_dataset):
         self.h = 11
         self.target_type = 'categorical'
         self.p = p
+        if cv != None:
+            self._cv_split(cv)
 
 
 
 class boson_housing_dataset(base_dataset):
-    def __init__(self,embedding_dim = 64,p = probs(0.15,0.15)):
+    def __init__(self,embedding_dim = 64,p = probs(0.15,0.15),cv=None):
         features,labels = load_boston(return_X_y=True)
         data = np.hstack((features, labels.reshape((-1, 1))))
         df = pd.DataFrame(data)
@@ -174,17 +178,18 @@ class boson_housing_dataset(base_dataset):
         categorical_cols = [3, 8]
         continuous_cols = [0, 1, 2, 4, 5, 6, 7, 9, 10, 11, 12, 13]
         self._manual_preprocessing(df,categorical_cols,continuous_cols)
-        self._cv_split(10)
         self.embedding_dim = embedding_dim
         self.input_dim = 14 * embedding_dim
         self.target_col = 13
         self.h = 14
         self.target_type = 'continuous'
         self.p = p
+        if cv != None:
+            self._cv_split(cv)
 
 
 class forest_cover_dataset(base_dataset):
-    def __init__(self,embedding_dim = 64,p = probs(0.15,0.15)):
+    def __init__(self,embedding_dim = 64,p = probs(0.15,0.15),cv = None):
         path = '/data/shared-data/UCI-income/forest_cover/covtype.data.gz'
         df = pd.read_csv(path, compression='gzip', header=None)
         self.split = {'train': 0.7, 'val': 0.1, 'test': 0.2}
@@ -195,9 +200,11 @@ class forest_cover_dataset(base_dataset):
         self.h = 55
         self.target_type = 'categorical'
         self.p = p
+        if cv != None:
+            self._cv_split(cv)
 
 class higgs_boston_dataset(base_dataset):
-    def __init__(self,embedding_dim = 64,p = probs(0.15,0.15)):
+    def __init__(self,embedding_dim = 64,p = probs(0.15,0.15),cv =None):
         path = '/data/shared-data/UCI-income/boston_higgs/HIGGS.csv.gz'
         df = pd.read_csv(path,compression='gzip',header=None)
         temp = df.pop(0)
@@ -212,10 +219,12 @@ class higgs_boston_dataset(base_dataset):
         self.h = 29
         self.target_type = 'categorical'
         self.p = p
+        if cv != None:
+            self._cv_split(cv)
 
 
 class kick_dataset(base_dataset):
-    def __init__(self,embedding_dim = 64,p = probs(0.15,0.15)):
+    def __init__(self,embedding_dim = 64,p = probs(0.15,0.15),cv = None):
         path = '/data/shared-data/UCI-income/kick/kick.csv'
         df = pd.read_csv(path,header=None,skiprows=1)
         temp = df.pop(0)
@@ -231,9 +240,11 @@ class kick_dataset(base_dataset):
         self.h = 33
         self.target_type = 'categorical'
         self.p = p
+        if cv != None:
+            self._cv_split(cv)
 
 class breast_cancer_dataset(base_dataset):
-    def __init__(self,embedding_dim = 64,p = probs(0.15,0.15)):
+    def __init__(self,embedding_dim = 64,p = probs(0.15,0.15),cv = None):
         features,labels = load_breast_cancer(return_X_y=True)
         data = np.hstack((features,labels.reshape(-1,1)))
         df = pd.DataFrame(data)
@@ -248,9 +259,11 @@ class breast_cancer_dataset(base_dataset):
         self.h = 31
         self.target_type = 'categorical'
         self.p = p
+        if cv != None:
+            self._cv_split(cv)
 
 class protein_dataset(base_dataset):
-    def __init__(self,embedding_dim = 64, p = probs(0.15,0.15)):
+    def __init__(self,embedding_dim = 64, p = probs(0.15,0.15),cv = None):
         path = '/data/shared-data/UCI-income/protein/protein.csv'
         df = pd.read_csv(path)
         temp = df.pop('RMSD')
@@ -263,9 +276,11 @@ class protein_dataset(base_dataset):
         self.h = 10
         self.target_type = 'continuous'
         self.p = p
+        if cv != None:
+            self._cv_split(cv)
 
 class concrete_dataset(base_dataset):
-    def __init__(self,embedding_dim = 64, p = probs(0.15,0.15)):
+    def __init__(self,embedding_dim = 64, p = probs(0.15,0.15),cv = None):
         path = '/data/shared-data/UCI-income/concrete/concrete_data.csv'
         df = pd.read_csv(path)
         self.split = {'train': 0.7, 'val': 0.1, 'test': 0.2}
@@ -277,9 +292,11 @@ class concrete_dataset(base_dataset):
         self.h = 9
         self.target_type = 'continuous'
         self.p = p
+        if cv != None:
+            self._cv_split(cv)
 
 class yacht_dataset(base_dataset):
-    def __init__(self,embedding_dim = 64, p = probs(0.15,0.15)):
+    def __init__(self,embedding_dim = 64, p = probs(0.15,0.15),cv = None):
         path = '/data/shared-data/UCI-income/yacht/yacht_hydrodynamics.data'
         df = pd.read_fwf(path,header = None)
         categorical_cols = np.arange(5)
@@ -293,6 +310,8 @@ class yacht_dataset(base_dataset):
         self.h = 7
         self.target_type = 'continuous'
         self.p = p
+        if cv != None:
+            self._cv_split(cv)
 
 
 

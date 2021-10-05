@@ -16,8 +16,9 @@ from training_constractor import *
 from util import probs
 
 def main():
+    cv = 10
     p = probs(0.15,1)
-    data = breast_cancer_dataset(embedding_dim=32,p = p)
+    data = breast_cancer_dataset(embedding_dim=32,p = p,cv= cv)
     device = 'cpu'
     if torch.cuda.is_available():
         device = 'cuda'
@@ -34,12 +35,26 @@ def main():
     rff_layers = 1
     drop_out = 0.1
     batch_size = -1
-    cv = 10
     init_tradeoff = 1
     finalize = False
     params_dict = {'max_steps':max_steps,'lr':lr,'betas':betas,'eps':eps,'flat':flat,'k':k,'alpha':alpha,'model_layers':model_layers,'rff':rff_layers,'heads':model_heads,'drop':drop_out,'init_tradeoff':init_tradeoff,'finalize':finalize}
     trainer = Trainer(params_dict,nll(),100,device,1)
-    trainer.run_training(data,batch_size,cv)
+    trainer.run(data,batch_size,cv)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     # model = NPT(data.categorical, data.continuous, data.embedding_dim, data.input_dim,model_layers ,model_heads,rff_layers,data.h,device,drop_out,finalize)
     # loss_function = Loss(data,max_steps,init_loss_tradeoff)
     # optimizer = Lamb(model.parameters(),lr = lr,betas=betas,eps=eps)
