@@ -144,4 +144,6 @@ class gradient_clipper():
     def __init__(self,clip):
         self.clip = clip
     def clip_gradient(self, model):
-        clip_grad_norm_(model.parameters(),self.clip)
+        for p in model.parameters():
+            p.register_hook(
+                lambda grad: torch.clamp(grad, -self.clip, self.clip))

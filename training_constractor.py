@@ -21,7 +21,7 @@ class Trainer():
         self.eval_metric = eval_metric
         self.eval_steps = eval_every_n_th_epoch
         if clip != None:
-            self.clip = gradient_clipper(clip)
+            self.clip = clip
         else:
             self.clip = None
         self.lr_scheduler = lr_scheduler
@@ -30,8 +30,12 @@ class Trainer():
 
     def build_npt(self, data):
         self.model = NPT(data.categorical, data.continuous, data.embedding_dim, data.input_dim,
-                         self.params['model_layers'], self.params['heads'], self.params['rff'], data.h, self.device,
+                         self.params['model_layers'], self.params['heads'], self.params['rff'], self.device,
                          self.params['drop'], self.params['finalize'])
+        if self.clip is not None:
+            for p in self.model.parameters():
+                p.register_hook(
+                    lambda grad: torch.clamp(grad, -self.clip, self.clip))
 
     def build_loss_function(self, data):
         self.loss_function = Loss(data, self.params['max_steps'], self.params['init_tradeoff'])
@@ -88,11 +92,12 @@ class Trainer():
 
     def train(self, data, batch_size):
         epochs, batch_size = self.get_epochs(data, self.params['max_steps'], batch_size)
-        for epoch in range(1, epochs + 1):
-            X, M = data.create_mask()
-            train = utils_data.TensorDataset(X.to(self.device), M.to(self.device),
+        X, M = data.create_mask()
+        train = utils_data.TensorDataset(X.to(self.device), M.to(self.device),
                                 torch.tensor(data.train_data, requires_grad=False, dtype=torch.float).to(self.device))
-            train_loader = utils_data.DataLoader(train, batch_size=batch_size, shuffle=True)
+        train_loader = utils_data.DataLoader(train, batch_size=batch_size, shuffle=True)
+        start = time.time()
+        for epoch in range(1, epochs + 1):
             for batch_data in train_loader:
                 batch_X, batch_M, batch_real_data = batch_data
                 batch_loss = self.pass_through(batch_X, batch_M, batch_real_data)
@@ -100,6 +105,8 @@ class Trainer():
                 true_labels = np.concatenate((data.train_data[:, -1], data.val_data[:, -1]))
                 eval_X, eval_M = data.mask_targets('val')
                 eval_loss = self.evaluate(data, eval_X, eval_M, true_labels)
+                print(f"time for 100 epochs is {time.time()-start} seconds")
+                start = time.time()
                 print(f"The evaluation metric loss on the validation set is {eval_loss} after {epoch} epochs")
                 print(f"model loss was {batch_loss} after {epoch} epochs")
 
@@ -107,8 +114,6 @@ class Trainer():
         z = self.model.forward(batch_X, batch_M)
         batch_loss = self.loss_function.compute(z, batch_real_data, batch_M)
         batch_loss.backward()
-        if self.clip != None:
-            self.clip.clip_gradient(self.model)
         self.optimizer.step()
         if self.lr_scheduler == 'flat_then_anneal':
             self.optimizer.flat_then_anneal()

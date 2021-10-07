@@ -138,7 +138,6 @@ class income_dataset(base_dataset):
         self.embedding_dim = embedding_dim
         self.input_dim = 42 * embedding_dim
         self.target_col = 41
-        self.h = 42
         self.target_type = 'categorical'
         self.p = p
         if cv !=None:
@@ -161,7 +160,6 @@ class poker_dataset(base_dataset):
         self.embedding_dim = embedding_dim
         self.input_dim = 11 * embedding_dim
         self.target_col = 10
-        self.h = 11
         self.target_type = 'categorical'
         self.p = p
         if cv != None:
@@ -181,7 +179,6 @@ class boson_housing_dataset(base_dataset):
         self.embedding_dim = embedding_dim
         self.input_dim = 14 * embedding_dim
         self.target_col = 13
-        self.h = 14
         self.target_type = 'continuous'
         self.p = p
         if cv != None:
@@ -197,7 +194,6 @@ class forest_cover_dataset(base_dataset):
         self.embedding_dim = embedding_dim
         self.input_dim = 55 * embedding_dim
         self.target_col = 54
-        self.h = 55
         self.target_type = 'categorical'
         self.p = p
         if cv != None:
@@ -216,7 +212,6 @@ class higgs_boston_dataset(base_dataset):
         self.embedding_dim = embedding_dim
         self.input_dim = 29 * embedding_dim
         self.target_col = 28
-        self.h = 29
         self.target_type = 'categorical'
         self.p = p
         if cv != None:
@@ -237,7 +232,6 @@ class kick_dataset(base_dataset):
         self.embedding_dim = embedding_dim
         self.input_dim = 33 * embedding_dim
         self.target_col = 32
-        self.h = 33
         self.target_type = 'categorical'
         self.p = p
         if cv != None:
@@ -248,7 +242,7 @@ class breast_cancer_dataset(base_dataset):
         features,labels = load_breast_cancer(return_X_y=True)
         data = np.hstack((features,labels.reshape(-1,1)))
         df = pd.DataFrame(data)
-        self.split = {'train': 0.7, 'val': 0.1, 'test': 0.2}
+        self.split = {'train': 0.7, 'val': 0.2, 'test': 0.1}
         categorical_cols = [30]
         continuous_cols = np.arange(30).tolist()
         self._manual_preprocessing(df,categorical_cols,continuous_cols)
@@ -256,7 +250,6 @@ class breast_cancer_dataset(base_dataset):
         self.embedding_dim = embedding_dim
         self.input_dim = 31 * embedding_dim
         self.target_col = 30
-        self.h = 31
         self.target_type = 'categorical'
         self.p = p
         if cv != None:
@@ -273,7 +266,6 @@ class protein_dataset(base_dataset):
         self.embedding_dim = embedding_dim
         self.input_dim = 10 * embedding_dim
         self.target_col = 9
-        self.h = 10
         self.target_type = 'continuous'
         self.p = p
         if cv != None:
@@ -289,7 +281,6 @@ class concrete_dataset(base_dataset):
         self.embedding_dim = embedding_dim
         self.input_dim = 9 * embedding_dim
         self.target_col = 8
-        self.h = 9
         self.target_type = 'continuous'
         self.p = p
         if cv != None:
@@ -307,7 +298,6 @@ class yacht_dataset(base_dataset):
         self.embedding_dim = embedding_dim
         self.input_dim = 7 * embedding_dim
         self.target_col = 6
-        self.h = 7
         self.target_type = 'continuous'
         self.p = p
         if cv != None:
