@@ -3,7 +3,7 @@ import torch
 from torch.nn import functional as F
 import random
 from torch.nn.utils import clip_grad_norm_
-
+from sklearn.preprocessing import StandardScaler
 class Flatten(nn.Module):
     @staticmethod
     def forward(X):
@@ -22,12 +22,11 @@ class probs():
         self.f_mo = p_features * 0.9
         self.f_r = 0.1 * p_features
         self.f_uc = 1 - p_features
-        self.l_mo = p_labels * 0.9
-        self.l_r = p_labels * 0.1
+        self.l_mo = p_labels
         self.l_uc = 1 - p_labels
 
 class Input_Embbeding(nn.Module):
-    def __init__(self, categorical: dict, continuous, embedding_dim, device):
+    def __init__(self, data, device):
         '''
         :param categorical: a dictionary containing the columns of the categorical attributes of the data as keys and
         the number of classes in the category as key
@@ -39,29 +38,17 @@ class Input_Embbeding(nn.Module):
         learnable weights of the columns
         '''
         super(Input_Embbeding, self).__init__()
-        self.continuous = continuous
-        self.categorical = categorical
-        self.index_embedding = nn.Embedding(len(categorical.keys()) + len(continuous), embedding_dim)
-        self.into_cat = nn.ModuleDict({str(col): nn.Linear(classes + 1, embedding_dim) for col, classes in categorical.items()})
-        self.into_cont = nn.ModuleDict({str(col): nn.Linear(2, embedding_dim) for col in continuous})
+        self.continuous = data.continuous
+        self.categorical = data.categorical
+        self.index_embedding = nn.Embedding(len(self.categorical.keys()) + len(self.continuous), data.embedding_dim)
+        self.into_cat = nn.ModuleDict({str(col): nn.Linear(classes + 1, data.embedding_dim) for col, classes in self.categorical.items()})
+        self.into_cont = nn.ModuleDict({str(col): nn.Linear(2, data.embedding_dim) for col in self.continuous})
         self.device = device
-        self.type_embedding = nn.Embedding(2, embedding_dim)
+        self.type_embedding = nn.Embedding(2, data.embedding_dim)
         self.cat_index = torch.tensor(0).to(device)
         self.cont_index = torch.tensor(1).to(device)
         self.to(device)
 
-    @staticmethod
-    def standardize(X):
-        '''
-        :param X:input data
-        :return: standardize data
-        '''
-        mean = X.mean(dim=0, keepdim=True)
-        std = X.std(dim=0, keepdim=True)
-        if std.item() != 0:
-            return (X - mean) / std
-        else:
-            return X-mean
 
     def forward(self,X,M):
         '''
@@ -75,15 +62,33 @@ class Input_Embbeding(nn.Module):
                 torch.cat((F.one_hot(X[:, col].long(), classes), M[:, col].unsqueeze(dim=1).long()), dim=1).float())
             encodings[col] += self.index_embedding(torch.tensor(col).to(self.device)) + self.type_embedding(self.cat_index)
         for col in self.continuous:
-            encodings[col] = self.into_cont[str(col)](torch.stack((self.standardize(X[:, col]), M[:, col]), dim=1))
+            encodings[col] = self.into_cont[str(col)](torch.stack((X[:, col], M[:, col]), dim=1))
             encodings[col] += self.index_embedding(torch.tensor(torch.tensor(col).to(self.device))) + self.type_embedding(self.cont_index)
         encodings_list = sorted([(key, item) for key, item in encodings.items()])
         encodings_list = [item[1] for item in encodings_list]
         return torch.stack(encodings_list, dim=1)
 
+class normalizer():
+    def __init__(self,data,cols):
+        self.stats = {}
+        self.cols = cols.copy()
+        for col in self.cols:
+            self.stats[col]={}
+            self.stats[col]['mean'] = data[:,col].mean()
+            self.stats[col]['std'] = data[:,col].std()
+
+    def normalize(self,input,mask = None):
+        if mask is None:
+            for col in self.cols:
+                input[:,col] = (input[:,col]-self.stats[col]['mean'])/self.stats[col]['std']
+        else:
+            for col in self.cols:
+                indices = mask[:,col] == 0
+                input[indices,col] = (input[indices,col]-self.stats[col]['mean'])/self.stats[col]['std']
+        return input
 
 class Output_Encoding(nn.Module):
-    def __init__(self, categorical: dict, continuous, embedding_dim,finalize, device):
+    def __init__(self, data, device):
         '''
         :param categorical: a dictionary containing the columns of the categorical attributes of the data as keys and
         the number of classes in the category as key
@@ -92,11 +97,10 @@ class Output_Encoding(nn.Module):
         :param device: cuda or cpu
         '''
         super(Output_Encoding, self).__init__()
-        self.cat = categorical.keys()
-        self.cont = continuous
-        self.out_cat = nn.ModuleDict({str(col): nn.Linear(embedding_dim, categorical[col]) for col in categorical.keys()})
-        self.out_cont = nn.ModuleDict({str(col): nn.Linear(embedding_dim, 1) for col in continuous})
-        self.finalize = finalize
+        self.cat = data.categorical.keys()
+        self.cont = data.continuous
+        self.out_cat = nn.ModuleDict({str(col): nn.Linear(data.embedding_dim, data.categorical[col]) for col in data.categorical.keys()})
+        self.out_cont = nn.ModuleDict({str(col): nn.Linear(data.embedding_dim, 1) for col in data.continuous})
         self.to(device)
 
     def forward(self, H):
@@ -105,12 +109,8 @@ class Output_Encoding(nn.Module):
         :return: final output
         '''
         z = {}
-        if self.finalize and not self.training:
-            for col in self.cat:
-                z[col] = torch.argmax(self.out_cat[str(col)](H[:, col, :]),dim=1).float()
-        else:
-            for col in self.cat:
-                z[col] = self.out_cat[str(col)](H[:, col, :])
+        for col in self.cat:
+            z[col] = self.out_cat[str(col)](H[:, col, :])
         for col in self.cont:
              z[col] = self.out_cont[str(col)](H[:, col, :]).squeeze()
         return z

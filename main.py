@@ -1,7 +1,7 @@
 from build_datasets import *
-from training_constractor import *
 from util import probs
-
+from evaluation_metrics import *
+from training_constractor import Trainer
 def main():
     cv = 10
     p = probs(0.15,1)
@@ -23,11 +23,9 @@ def main():
     drop_out = 0.1
     batch_size = -1
     init_tradeoff = 1
-    finalize = False
-    params_dict = {'max_steps':max_steps,'lr':lr,'betas':betas,'eps':eps,'flat':flat,'k':k,'alpha':alpha,'model_layers':model_layers,'rff':rff_layers,'heads':model_heads,'drop':drop_out,'init_tradeoff':init_tradeoff,'finalize':finalize}
-    trainer = Trainer(params_dict,nll(),100,device,1)
+    params_dict = {'max_steps':max_steps,'lr':lr,'betas':betas,'eps':eps,'flat':flat,'k':k,'alpha':alpha,'model_layers':model_layers,'rff':rff_layers,'heads':model_heads,'drop':drop_out,'init_tradeoff':init_tradeoff}
+    trainer = Trainer(params_dict=params_dict,eval_metric=nll(),eval_every_n_th_epoch=100,data=data,device=device,clip=1)
     trainer.run(data,batch_size,cv)
-
 
 
 

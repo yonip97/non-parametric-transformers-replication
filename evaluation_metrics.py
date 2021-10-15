@@ -11,7 +11,7 @@ class acc():
         # temporary
         pred_labels = torch.argmax(pred_labels,dim=1)
         true_labels = torch.tensor(true_labels).long()
-        return torch.sum((pred_labels == true_labels).float() * mask )/torch.sum(mask)
+        return torch.sum((pred_labels == true_labels).float() * mask)/torch.sum(mask)
 
 
 class nll():

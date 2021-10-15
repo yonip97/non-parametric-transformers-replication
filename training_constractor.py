@@ -5,8 +5,8 @@ from lamb import Lamb
 import time
 import torch.utils.data as utils_data
 import numpy as np
-from evaluation_metrics import *
-from util import permute, gradient_clipper
+#from evaluation_metrics import *
+from util import permute, normalizer
 import math
 from npt import NPT
 from loss import Loss
@@ -15,7 +15,7 @@ from lamb import Lamb
 
 
 class Trainer():
-    def __init__(self, params_dict, eval_metric, eval_every_n_th_epoch, device, clip=None,
+    def __init__(self, params_dict, eval_metric, eval_every_n_th_epoch,data, device, clip=None,
                  lr_scheduler='flat_then_anneal', tradeoff_scheduler='cosine'):
         self.params = params_dict
         self.eval_metric = eval_metric
@@ -29,9 +29,8 @@ class Trainer():
         self.device = device
 
     def build_npt(self, data):
-        self.model = NPT(data.categorical, data.continuous, data.embedding_dim, data.input_dim,
-                         self.params['model_layers'], self.params['heads'], self.params['rff'], self.device,
-                         self.params['drop'], self.params['finalize'])
+        self.model = NPT(data,self.params['model_layers'], self.params['heads'], self.params['rff'], self.device,
+                         self.params['drop'])
         if self.clip is not None:
             for p in self.model.parameters():
                 p.register_hook(
@@ -65,14 +64,13 @@ class Trainer():
             self.run_deletion(data,batch_size,cv)
 
     def run_training(self, data, batch_size, cv=None):
+        data.normalize()
         if cv == None:
             self.build_npt(data)
             self.build_optimizer()
             self.build_loss_function(data)
             self.train(data, batch_size)
-            X_test, M_test = data.mask_targets('test')
-            true_labels = np.concatenate((data.train_data[:, -1], data.val_data[:, -1], data.test_data[:, -1]))
-            test_eval =  self.evaluate(data, X_test, M_test, true_labels)
+            test_eval = self.test(data)
             print(f"The evaluation metric loss on the test set is {test_eval}")
             return test_eval
         else:
@@ -83,16 +81,14 @@ class Trainer():
                 self.build_optimizer()
                 self.build_loss_function(data)
                 self.train(data, batch_size)
-                X_test, M_test = data.mask_targets('test')
-                true_labels = np.concatenate((data.train_data[:, -1], data.val_data[:, -1], data.test_data[:, -1]))
-                test_eval = self.evaluate(data, X_test, M_test, true_labels)
+                test_eval = self.test(data)
                 print(f"The evaluation metric loss on the test set is {test_eval}")
                 test_evals.append(test_eval)
             return np.array(test_evals)
 
     def train(self, data, batch_size):
         epochs, batch_size = self.get_epochs(data, self.params['max_steps'], batch_size)
-        X, M = data.create_mask()
+        X, M = data.create_training_mask()
         train = utils_data.TensorDataset(X.to(self.device), M.to(self.device),
                                 torch.tensor(data.train_data, requires_grad=False, dtype=torch.float).to(self.device))
         train_loader = utils_data.DataLoader(train, batch_size=batch_size, shuffle=True)
@@ -124,17 +120,22 @@ class Trainer():
 
     def evaluate(self, data, eval_X, eval_M, true_labels):
         self.model.eval()
-        z = self.model.forward(eval_X.to(self.device), eval_M.to(self.device))
-        if self.model.finalize:
-            pred = z[:, -1].detach().cpu()
-            # eval_acc = acc.compute(pred, true_labels, eval_M[:, -1])
-        else:
+        with torch.no_grad():
+            z = self.model.forward(eval_X.to(self.device), eval_M.to(self.device))
             pred = z[data.target_col].detach().cpu()
             # eval_acc = acc.compute(pred,true_labels,eval_M[:,-1])
-        eval_loss = self.eval_metric.compute(pred, true_labels, eval_M[:, -1])
+            if data.target_type =='continuous':
+                pred *= data.stats[data.target_col]['std']
+                true_labels *= data.stats[data.target_col]['std']
+            eval_loss = self.eval_metric.compute(pred, true_labels, eval_M[:, -1])
         self.model.train()
         return eval_loss
 
+    def test(self,data):
+        X_test, M_test = data.mask_targets('test')
+        true_labels = np.concatenate((data.train_data[:, -1], data.val_data[:, -1], data.test_data[:, -1]))
+        test_eval = self.evaluate(data, X_test, M_test, true_labels)
+        return test_eval
 
 
     def run_duplicate(self,data,batch_size,cv = None):
@@ -173,9 +174,10 @@ class Trainer():
     def data_duplicate(self, data, batch_size):
         epochs, batch_size = self.get_epochs(data, self.params['max_steps'], batch_size)
         for epoch in range(1, epochs + 1):
-            X, M = data.create_mask()
+            train_data, val_data, test_data = data.normalize()
+            X, M = data.create_training_mask(train_data)
             train = utils_data.TensorDataset(X.to(self.device), M.to(self.device),
-                                             torch.tensor(data.train_data, requires_grad=False, dtype=torch.float).to(
+                                             torch.tensor(train_data, requires_grad=False, dtype=torch.float).to(
                                                  self.device))
             train_loader = utils_data.DataLoader(train, batch_size=batch_size, shuffle=True)
             for batch_data in train_loader:

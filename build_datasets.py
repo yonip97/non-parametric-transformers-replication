@@ -9,7 +9,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.datasets import load_boston,load_breast_cancer
 from sklearn.model_selection import KFold
 from util import probs
-
+from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import OneHotEncoder
 
 
 class base_dataset():
@@ -27,7 +28,8 @@ class base_dataset():
         else:
             self.categorical = {}
             self.continuous = list(df.columns)
-        self._create_sets(df.to_numpy())
+        data = df.to_numpy(dtype=np.float)
+        self._create_sets(data)
 
     def _manual_preprocessing(self, df,categorical_cols,continuous_cols):
         new_cols = {col: new_col for col, new_col in zip(df.columns, range(len(df.columns) + 1))}
@@ -35,32 +37,49 @@ class base_dataset():
         self.categorical = df[categorical_cols].nunique().to_dict()
         self.continuous = continuous_cols
         df[categorical_cols] = df[categorical_cols].astype('category')
-        df[categorical_cols]  = df[categorical_cols].apply(lambda x:x.cat.codes)
+        df[categorical_cols] = df[categorical_cols].apply(lambda x:x.cat.codes)
         df[categorical_cols] = df[categorical_cols].replace(to_replace = -1,value = np.nan)
-        self._create_sets(df.to_numpy(dtype = np.float))
+        data = df.to_numpy(dtype = np.float)
+        self._create_sets(data)
+
 
     def _create_sets(self,data):
-        train_val_data, self.test_data = train_test_split(data, test_size=self.split['test'])
-        self.train_data, self.val_data = train_test_split(train_val_data, train_size=self.split['train'] / (
-                self.split['val'] + self.split['train']))
+        train_val_data, self.orig_test_data = train_test_split(data, test_size=self.split['test'])
+        self.orig_train_data,self.orig_val_data = train_test_split(train_val_data,train_size=self.split['train']/(self.split['train']+self.split['val']))
 
     def _cv_split(self,cv):
-        self.train_val_data = np.concatenate((self.train_data,self.val_data))
+        self.orig_train_val_data = np.concatenate((self.orig_train_data,self.orig_val_data))
         self.cv = cv
         splitter = KFold(n_splits=cv)
-        self.generator = splitter.split(self.train_val_data)
+        self.generator = splitter.split(self.orig_train_val_data)
 
 
     def next(self):
         train_indices, val_indices = next(self.generator)
-        self.val_data = self.train_val_data[val_indices]
-        self.train_data = self.train_val_data[train_indices]
+        self.orig_val_data = self.orig_train_val_data[val_indices]
+        self.orig_train_data = self.orig_train_val_data[train_indices]
 
-    def restart_splitter(self):
-        splitter = KFold(n_splits=self.cv)
-        self.generator = splitter.split(self.train_val_data)
+    def obtain_stats(self):
+        self.stats = {}
+        for col in self.continuous:
+            self.stats[col] = {}
+            self.stats[col]['mean'] = self.orig_train_data[:,col].mean()
+            self.stats[col]['std'] = self.orig_train_data[:,col].std()
 
-    def create_mask(self):
+    def normalize(self):
+        self.obtain_stats()
+        train_data = np.copy(self.orig_train_data)
+        val_data = np.copy(self.orig_val_data)
+        test_data = np.copy(self.orig_test_data)
+        for col in self.continuous:
+            train_data[:,col] = (train_data[:,col]-self.stats[col]['mean'])/self.stats[col]['std']
+            val_data[:,col] = (val_data[:,col] - self.stats[col]['mean'])/self.stats[col]['std']
+            test_data[:,col] = (test_data[:,col] - self.stats[col]['mean'])/self.stats[col]['std']
+        self.train_data = train_data
+        self.val_data = val_data
+        self.test_data = test_data
+
+    def create_training_mask(self):
         '''
         unchanged value get mask value of 0.
         masked out value of 1
@@ -69,10 +88,6 @@ class base_dataset():
         '''
         features = np.copy(self.train_data[:,:-1])
         labels = np.copy(self.train_data[:,-1])
-        if self.target_type == 'categorical':
-            labels_classes = self.categorical.pop(self.target_col, None)
-        else:
-            self.continuous.remove(self.target_col)
         flat_features = features.flatten()
         feature_mask = np.full(flat_features.shape,1)
         mask_features = np.random.choice(a=[0,1,2], size=np.count_nonzero(~np.isnan(flat_features)),
@@ -81,12 +96,16 @@ class base_dataset():
         feature_mask = feature_mask.reshape(features.shape)
         flat_labels = labels.flatten()
         labels_mask = np.full(flat_labels.shape,1)
-        mask_labels = np.random.choice(a=[0,1,2], size=np.count_nonzero(~np.isnan(flat_labels)),
-                                       p=[self.p.l_uc,self.p.l_mo,self.p.l_r])
+        mask_labels = np.random.choice(a=[0,1], size=np.count_nonzero(~np.isnan(flat_labels)),
+                                       p=[self.p.l_uc,self.p.l_mo])
         labels_mask[~np.isnan(flat_labels)] = mask_labels
         labels_mask = labels_mask.reshape(labels.shape)
         features[feature_mask == 1] = 0
         feature_indices = feature_mask == 2
+        if self.target_type == 'categorical':
+            labels_classes = self.categorical.pop(self.target_col, None)
+        else:
+            self.continuous.remove(self.target_col)
         for category in self.continuous:
             arr_size = np.count_nonzero(feature_indices[:, category] == True)
             features[feature_indices[:, category], category] = np.random.normal(0, 1, arr_size)
@@ -94,13 +113,9 @@ class base_dataset():
             arr_size = np.count_nonzero(feature_indices[:, category] == True)
             features[feature_indices[:, category], category] = np.random.randint(low=0, high=classes, size=arr_size)
         labels[labels_mask == 1] = 0
-        label_indices = labels_mask == 2
-        arr_size = np.count_nonzero(label_indices == True)
         if self.target_type == 'categorical':
-            labels[label_indices] = np.random.randint(low=0, high=labels_classes, size=arr_size)
             self.categorical[self.target_col] = labels_classes
         else:
-            labels[label_indices] = np.random.normal(0, 1, arr_size)
             self.continuous.append(self.target_col)
         X = np.hstack((features, labels.reshape((-1, 1))))
         mask = np.hstack((feature_mask, labels_mask.reshape((-1, 1))))
@@ -166,7 +181,6 @@ class poker_dataset(base_dataset):
             self._cv_split(cv)
 
 
-
 class boson_housing_dataset(base_dataset):
     def __init__(self,embedding_dim = 64,p = probs(0.15,0.15),cv=None):
         features,labels = load_boston(return_X_y=True)
@@ -183,7 +197,6 @@ class boson_housing_dataset(base_dataset):
         self.p = p
         if cv != None:
             self._cv_split(cv)
-
 
 class forest_cover_dataset(base_dataset):
     def __init__(self,embedding_dim = 64,p = probs(0.15,0.15),cv = None):
@@ -217,7 +230,6 @@ class higgs_boston_dataset(base_dataset):
         if cv != None:
             self._cv_split(cv)
 
-
 class kick_dataset(base_dataset):
     def __init__(self,embedding_dim = 64,p = probs(0.15,0.15),cv = None):
         path = '/data/shared-data/UCI-income/kick/kick.csv'
@@ -246,7 +258,6 @@ class breast_cancer_dataset(base_dataset):
         categorical_cols = [30]
         continuous_cols = np.arange(30).tolist()
         self._manual_preprocessing(df,categorical_cols,continuous_cols)
-        self._cv_split(10)
         self.embedding_dim = embedding_dim
         self.input_dim = 31 * embedding_dim
         self.target_col = 30
@@ -277,7 +288,6 @@ class concrete_dataset(base_dataset):
         df = pd.read_csv(path)
         self.split = {'train': 0.7, 'val': 0.1, 'test': 0.2}
         self._cutoff(df, -1)
-        self._cv_split(10)
         self.embedding_dim = embedding_dim
         self.input_dim = 9 * embedding_dim
         self.target_col = 8
@@ -294,7 +304,6 @@ class yacht_dataset(base_dataset):
         continuous_cols = [5,6]
         self.split = {'train': 0.7, 'val': 0.1, 'test': 0.2}
         self._manual_preprocessing(df,categorical_cols,continuous_cols)
-        self._cv_split(10)
         self.embedding_dim = embedding_dim
         self.input_dim = 7 * embedding_dim
         self.target_col = 6
@@ -302,7 +311,6 @@ class yacht_dataset(base_dataset):
         self.p = p
         if cv != None:
             self._cv_split(cv)
-
 
 
 
