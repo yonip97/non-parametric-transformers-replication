@@ -11,19 +11,19 @@ class NPT(nn.Module):
     '''
     non parametric transformer
     '''
-    def __init__(self,data, layers, heads, rff_layers, device,drop_out = None):
+    def __init__(self,encoded_data, layers, heads, rff_layers, device,drop_out = None):
         super(NPT, self).__init__()
-        self.input_embedding = Input_Embbeding(data,device)
-        self.output_embedding = Output_Encoding(data, device)
+        self.input_embedding = Input_Embbeding(encoded_data,device)
+        self.output_embedding = Output_Encoding(encoded_data, device)
         self.network = nn.Sequential()
-        self.ln = nn.LayerNorm(data.embedding_dim)
-        reshape = Reshape(data.embedding_dim)
+        self.ln = nn.LayerNorm(encoded_data.embedding_dim)
+        reshape = Reshape(encoded_data.embedding_dim)
         flatten = Flatten()
         for layer in range(layers):
             self.network.add_module(f"flatten_{layer+1}",flatten)
-            self.network.add_module(f'abd_{layer+1}',MHSA(data.input_dim, rff_layers, heads,drop_out, device))
+            self.network.add_module(f'abd_{layer+1}',MHSA(encoded_data.input_dim, rff_layers, heads,drop_out, device))
             self.network.add_module(f"reshape_{layer+1}",reshape)
-            self.network.add_module(f'aba_{layer+1}',MHSA(data.embedding_dim, rff_layers, heads,drop_out, device))
+            self.network.add_module(f'aba_{layer+1}',MHSA(encoded_data.embedding_dim, rff_layers, heads,drop_out, device))
         if drop_out is None:
             self.drop_out = None
         else:

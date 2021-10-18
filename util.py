@@ -26,7 +26,7 @@ class probs():
         self.l_uc = 1 - p_labels
 
 class Input_Embbeding(nn.Module):
-    def __init__(self, data, device):
+    def __init__(self, encoded_data, device):
         '''
         :param categorical: a dictionary containing the columns of the categorical attributes of the data as keys and
         the number of classes in the category as key
@@ -38,13 +38,14 @@ class Input_Embbeding(nn.Module):
         learnable weights of the columns
         '''
         super(Input_Embbeding, self).__init__()
-        self.continuous = data.continuous
-        self.categorical = data.categorical
-        self.index_embedding = nn.Embedding(len(self.categorical.keys()) + len(self.continuous), data.embedding_dim)
-        self.into_cat = nn.ModuleDict({str(col): nn.Linear(classes + 1, data.embedding_dim) for col, classes in self.categorical.items()})
-        self.into_cont = nn.ModuleDict({str(col): nn.Linear(2, data.embedding_dim) for col in self.continuous})
+        self.continuous = encoded_data.continuous
+        self.categorical = encoded_data.categorical
+        self.encoders = encoded_data.encoders
+        self.index_embedding = nn.Embedding(len(self.categorical.keys()) + len(self.continuous), encoded_data.embedding_dim)
+        self.into_cat = nn.ModuleDict({str(col): nn.Linear(classes + 1, encoded_data.embedding_dim) for col, classes in self.categorical.items()})
+        self.into_cont = nn.ModuleDict({str(col): nn.Linear(2, encoded_data.embedding_dim) for col in self.continuous})
         self.device = device
-        self.type_embedding = nn.Embedding(2, data.embedding_dim)
+        self.type_embedding = nn.Embedding(2, encoded_data.embedding_dim)
         self.cat_index = torch.tensor(0).to(device)
         self.cont_index = torch.tensor(1).to(device)
         self.to(device)
@@ -58,37 +59,22 @@ class Input_Embbeding(nn.Module):
         '''
         encodings = {}
         for col, classes in self.categorical.items():
-            encodings[col] = self.into_cat[str(col)](
-                torch.cat((F.one_hot(X[:, col].long(), classes), M[:, col].unsqueeze(dim=1).long()), dim=1).float())
+            encoded_col = self.one_hot_encode(X[:,col],col).to(self.device)
+            #encoded_col = torch.tensor(self.encoders[col].transform(X[:, col].view(-1,1).to_numpy()))
+            encodings[col] = self.into_cat[str(col)](torch.cat((encoded_col, M[:, col].unsqueeze(dim=1).long()), dim=1).float())
             encodings[col] += self.index_embedding(torch.tensor(col).to(self.device)) + self.type_embedding(self.cat_index)
         for col in self.continuous:
             encodings[col] = self.into_cont[str(col)](torch.stack((X[:, col], M[:, col]), dim=1))
-            encodings[col] += self.index_embedding(torch.tensor(torch.tensor(col).to(self.device))) + self.type_embedding(self.cont_index)
+            encodings[col] += self.index_embedding(torch.tensor(col).to(self.device)) + self.type_embedding(self.cont_index)
         encodings_list = sorted([(key, item) for key, item in encodings.items()])
         encodings_list = [item[1] for item in encodings_list]
         return torch.stack(encodings_list, dim=1)
 
-class normalizer():
-    def __init__(self,data,cols):
-        self.stats = {}
-        self.cols = cols.copy()
-        for col in self.cols:
-            self.stats[col]={}
-            self.stats[col]['mean'] = data[:,col].mean()
-            self.stats[col]['std'] = data[:,col].std()
-
-    def normalize(self,input,mask = None):
-        if mask is None:
-            for col in self.cols:
-                input[:,col] = (input[:,col]-self.stats[col]['mean'])/self.stats[col]['std']
-        else:
-            for col in self.cols:
-                indices = mask[:,col] == 0
-                input[indices,col] = (input[indices,col]-self.stats[col]['mean'])/self.stats[col]['std']
-        return input
+    def one_hot_encode(self,data,col):
+        return torch.tensor(self.encoders[col].transform(data.view(-1, 1).cpu().numpy()))
 
 class Output_Encoding(nn.Module):
-    def __init__(self, data, device):
+    def __init__(self, encoded_data, device):
         '''
         :param categorical: a dictionary containing the columns of the categorical attributes of the data as keys and
         the number of classes in the category as key
@@ -97,10 +83,10 @@ class Output_Encoding(nn.Module):
         :param device: cuda or cpu
         '''
         super(Output_Encoding, self).__init__()
-        self.cat = data.categorical.keys()
-        self.cont = data.continuous
-        self.out_cat = nn.ModuleDict({str(col): nn.Linear(data.embedding_dim, data.categorical[col]) for col in data.categorical.keys()})
-        self.out_cont = nn.ModuleDict({str(col): nn.Linear(data.embedding_dim, 1) for col in data.continuous})
+        self.cat = encoded_data.categorical.keys()
+        self.cont = encoded_data.continuous
+        self.out_cat = nn.ModuleDict({str(col): nn.Linear(encoded_data.embedding_dim, encoded_data.categorical[col]) for col in encoded_data.categorical.keys()})
+        self.out_cont = nn.ModuleDict({str(col): nn.Linear(encoded_data.embedding_dim, 1) for col in encoded_data.continuous})
         self.to(device)
 
     def forward(self, H):

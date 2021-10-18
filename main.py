@@ -2,16 +2,16 @@ from build_datasets import *
 from util import probs
 from evaluation_metrics import *
 from training_constractor import Trainer
+from encoding import Encoding
 def main():
     cv = 10
     p = probs(0.15,1)
-    data = breast_cancer_dataset(embedding_dim=32,p = p,cv= cv)
+    data = boson_housing_dataset(embedding_dim=128,p = p,cv= cv)
     device = 'cpu'
     if torch.cuda.is_available():
         device = 'cuda'
-    # Epochs = 2000
     max_steps = 2000
-    lr = 5e-4
+    lr = 1e-3
     betas = (0.9,0.99)
     eps = 1e-6
     flat = 0.5
@@ -24,8 +24,8 @@ def main():
     batch_size = -1
     init_tradeoff = 1
     params_dict = {'max_steps':max_steps,'lr':lr,'betas':betas,'eps':eps,'flat':flat,'k':k,'alpha':alpha,'model_layers':model_layers,'rff':rff_layers,'heads':model_heads,'drop':drop_out,'init_tradeoff':init_tradeoff}
-    trainer = Trainer(params_dict=params_dict,eval_metric=nll(),eval_every_n_th_epoch=100,data=data,device=device,clip=1)
-    trainer.run(data,batch_size,cv)
+    trainer = Trainer(params_dict=params_dict,eval_metric=rmse(),eval_every_n_th_epoch=100,data=data,device=device,clip=1)
+    trainer.run(data,p,batch_size,cv)
 
 
 

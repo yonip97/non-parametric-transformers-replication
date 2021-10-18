@@ -6,13 +6,13 @@ import time
 import torch.utils.data as utils_data
 import numpy as np
 #from evaluation_metrics import *
-from util import permute, normalizer
+from util import permute
 import math
 from npt import NPT
 from loss import Loss
 from lookahead import Lookahead
 from lamb import Lamb
-
+from encoding import Encoding
 
 class Trainer():
     def __init__(self, params_dict, eval_metric, eval_every_n_th_epoch,data, device, clip=None,
@@ -28,8 +28,8 @@ class Trainer():
         self.tradeoff_scheduler = tradeoff_scheduler
         self.device = device
 
-    def build_npt(self, data):
-        self.model = NPT(data,self.params['model_layers'], self.params['heads'], self.params['rff'], self.device,
+    def build_npt(self,encoded_data):
+        self.model = NPT(encoded_data,self.params['model_layers'], self.params['heads'], self.params['rff'], self.device,
                          self.params['drop'])
         if self.clip is not None:
             for p in self.model.parameters():
@@ -53,44 +53,46 @@ class Trainer():
             epochs = math.ceil(max_steps / steps_per_epoch)
             return epochs, batch_size
 
-    def run(self,data,batch_size,cv = None,test = None):
+    def run(self,data,p,batch_size,cv = None,test = None):
         if test == None:
-            self.run_training(data,batch_size,cv)
+            self.run_training(data,p,batch_size,cv)
         elif test == 'duplicate':
-            self.run_duplicate(data,batch_size, cv)
+            self.run_duplicate(data,p,batch_size, cv)
         elif test == 'corruption':
-            self.run_corroption(data,batch_size,cv)
+            self.run_corroption(data,p,batch_size,cv)
         elif test == 'deletion':
-            self.run_deletion(data,batch_size,cv)
+            self.run_deletion(data,p,batch_size,cv)
 
-    def run_training(self, data, batch_size, cv=None):
-        data.normalize()
+    def run_training(self, data,p, batch_size, cv=None):
         if cv == None:
-            self.build_npt(data)
+            epochs, batch_size = self.get_epochs(data, self.params['max_steps'], batch_size)
+            encoded_data = Encoding(data, p)
+            self.build_npt(encoded_data)
             self.build_optimizer()
-            self.build_loss_function(data)
-            self.train(data, batch_size)
-            test_eval = self.test(data)
+            self.build_loss_function(encoded_data)
+            self.train(encoded_data,epochs,batch_size)
+            test_eval = self.test(encoded_data)
             print(f"The evaluation metric loss on the test set is {test_eval}")
             return test_eval
         else:
             test_evals = []
             for i in range(cv):
                 data.next()
-                self.build_npt(data)
+                epochs, batch_size = self.get_epochs(data, self.params['max_steps'], batch_size)
+                encoded_data = Encoding(data, p)
+                self.build_npt(encoded_data)
                 self.build_optimizer()
-                self.build_loss_function(data)
-                self.train(data, batch_size)
-                test_eval = self.test(data)
+                self.build_loss_function(encoded_data)
+                self.train(encoded_data,epochs,batch_size)
+                test_eval = self.test(encoded_data)
                 print(f"The evaluation metric loss on the test set is {test_eval}")
                 test_evals.append(test_eval)
             return np.array(test_evals)
 
-    def train(self, data, batch_size):
-        epochs, batch_size = self.get_epochs(data, self.params['max_steps'], batch_size)
-        X, M = data.create_training_mask()
-        train = utils_data.TensorDataset(X.to(self.device), M.to(self.device),
-                                torch.tensor(data.train_data, requires_grad=False, dtype=torch.float).to(self.device))
+    def train(self, encoded_data,epochs, batch_size):
+        X_train,M_train,orig_train_data = encoded_data.get('train')
+        X_val,M_val,orig_val_data = encoded_data.get('val')
+        train = utils_data.TensorDataset(X_train.to(self.device), M_train.to(self.device),orig_train_data.to(self.device))
         train_loader = utils_data.DataLoader(train, batch_size=batch_size, shuffle=True)
         start = time.time()
         for epoch in range(1, epochs + 1):
@@ -98,9 +100,9 @@ class Trainer():
                 batch_X, batch_M, batch_real_data = batch_data
                 batch_loss = self.pass_through(batch_X, batch_M, batch_real_data)
             if epoch % self.eval_steps == 0:
-                true_labels = np.concatenate((data.train_data[:, -1], data.val_data[:, -1]))
-                eval_X, eval_M = data.mask_targets('val')
-                eval_loss = self.evaluate(data, eval_X, eval_M, true_labels)
+                #true_labels = np.concatenate((data.train_data[:, -1], data.val_data[:, -1]))
+                #eval_X, eval_M = data.mask_targets('val')
+                eval_loss = self.evaluate(encoded_data, X_val, M_val, orig_val_data[:,-1])
                 print(f"time for 100 epochs is {time.time()-start} seconds")
                 start = time.time()
                 print(f"The evaluation metric loss on the validation set is {eval_loss} after {epoch} epochs")
@@ -126,15 +128,16 @@ class Trainer():
             # eval_acc = acc.compute(pred,true_labels,eval_M[:,-1])
             if data.target_type =='continuous':
                 pred *= data.stats[data.target_col]['std']
+                pred += data.stats[data.target_col]['mean']
                 true_labels *= data.stats[data.target_col]['std']
+                true_labels += data.stats[data.target_col]['mean']
             eval_loss = self.eval_metric.compute(pred, true_labels, eval_M[:, -1])
         self.model.train()
         return eval_loss
 
     def test(self,data):
-        X_test, M_test = data.mask_targets('test')
-        true_labels = np.concatenate((data.train_data[:, -1], data.val_data[:, -1], data.test_data[:, -1]))
-        test_eval = self.evaluate(data, X_test, M_test, true_labels)
+        X_test, M_test,orig_test_tensors = data.get('test')
+        test_eval = self.evaluate(data, X_test, M_test, orig_test_tensors[:,-1])
         return test_eval
 
 

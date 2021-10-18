@@ -17,6 +17,8 @@ class base_dataset():
     def _cutoff(self,df, cont_features):
         new_cols = {col: new_col for col, new_col in zip(df.columns, range(len(df.columns) + 1))}
         df = df.rename(columns=new_cols)
+        #df = df.replace({np.nan: None})
+        #df = df[df.iloc[:, -1].notnull()]
         unique_values = df.nunique()
         if cont_features != -1:
             continuous = unique_values.nlargest(cont_features)
@@ -24,60 +26,46 @@ class base_dataset():
             self.continuous = continuous.index.tolist()
             df[list(self.categorical.keys())] = df[self.categorical.keys()].astype('category')
             df[list(self.categorical.keys())] = df[self.categorical.keys()].apply(lambda x: x.cat.codes)
-            df[list(self.categorical.keys())] = df[list(self.categorical.keys())].replace(to_replace=-1, value=np.nan)
+         #   df[list(self.categorical.keys())] = df[list(self.categorical.keys())].replace(to_replace=-1, value=np.nan)
         else:
             self.categorical = {}
             self.continuous = list(df.columns)
-        data = df.to_numpy(dtype=np.float)
-        self._create_sets(data)
+        #data = df.to_numpy(dtype=np.float)
+        #data = np.where(np.isnan(data), None, data)
+        self._create_sets(df.to_numpy(dtype=np.float))
 
     def _manual_preprocessing(self, df,categorical_cols,continuous_cols):
         new_cols = {col: new_col for col, new_col in zip(df.columns, range(len(df.columns) + 1))}
         df = df.rename(columns=new_cols)
+        #df = df.replace({np.nan: None})
+        #df = df[df.iloc[:,-1].notnull()]
         self.categorical = df[categorical_cols].nunique().to_dict()
         self.continuous = continuous_cols
         df[categorical_cols] = df[categorical_cols].astype('category')
         df[categorical_cols] = df[categorical_cols].apply(lambda x:x.cat.codes)
-        df[categorical_cols] = df[categorical_cols].replace(to_replace = -1,value = np.nan)
-        data = df.to_numpy(dtype = np.float)
-        self._create_sets(data)
-
+        #df[categorical_cols] = df[categorical_cols].replace(to_replace = -1,value = np.nan)
+        #data = df.to_numpy(dtype = np.float)
+        #data = np.where(np.isnan(data), None, data)
+        self._create_sets(df.to_numpy(dtype=np.float))
 
     def _create_sets(self,data):
-        train_val_data, self.orig_test_data = train_test_split(data, test_size=self.split['test'])
-        self.orig_train_data,self.orig_val_data = train_test_split(train_val_data,train_size=self.split['train']/(self.split['train']+self.split['val']))
+        train_val_data, self.test_data = train_test_split(data, test_size=self.split['test'])
+        self.train_data,self.val_data = train_test_split(train_val_data,train_size=self.split['train']/(self.split['train']+self.split['val']))
 
     def _cv_split(self,cv):
-        self.orig_train_val_data = np.concatenate((self.orig_train_data,self.orig_val_data))
+        self.orig_train_val_data = np.concatenate((self.train_data,self.val_data))
         self.cv = cv
         splitter = KFold(n_splits=cv)
         self.generator = splitter.split(self.orig_train_val_data)
 
-
     def next(self):
         train_indices, val_indices = next(self.generator)
-        self.orig_val_data = self.orig_train_val_data[val_indices]
-        self.orig_train_data = self.orig_train_val_data[train_indices]
+        self.val_data = self.orig_train_val_data[val_indices]
+        self.train_data = self.orig_train_val_data[train_indices]
 
-    def obtain_stats(self):
-        self.stats = {}
-        for col in self.continuous:
-            self.stats[col] = {}
-            self.stats[col]['mean'] = self.orig_train_data[:,col].mean()
-            self.stats[col]['std'] = self.orig_train_data[:,col].std()
 
-    def normalize(self):
-        self.obtain_stats()
-        train_data = np.copy(self.orig_train_data)
-        val_data = np.copy(self.orig_val_data)
-        test_data = np.copy(self.orig_test_data)
-        for col in self.continuous:
-            train_data[:,col] = (train_data[:,col]-self.stats[col]['mean'])/self.stats[col]['std']
-            val_data[:,col] = (val_data[:,col] - self.stats[col]['mean'])/self.stats[col]['std']
-            test_data[:,col] = (test_data[:,col] - self.stats[col]['mean'])/self.stats[col]['std']
-        self.train_data = train_data
-        self.val_data = val_data
-        self.test_data = test_data
+
+
 
     def create_training_mask(self):
         '''
