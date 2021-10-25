@@ -12,7 +12,7 @@ from npt import NPT
 from loss import Loss
 from lookahead import Lookahead
 from lamb import Lamb
-from encoding import Encoding
+from preprocessing import Preprocessing
 
 class Trainer():
     def __init__(self, params_dict, eval_metric, eval_every_n_th_epoch,data, device, clip=None,
@@ -66,7 +66,7 @@ class Trainer():
     def run_training(self, data,p, batch_size, cv=None):
         if cv == None:
             epochs, batch_size = self.get_epochs(data, self.params['max_steps'], batch_size)
-            encoded_data = Encoding(data, p)
+            encoded_data = Preprocessing(data, p)
             self.build_npt(encoded_data)
             self.build_optimizer()
             self.build_loss_function(encoded_data)
@@ -79,7 +79,7 @@ class Trainer():
             for i in range(cv):
                 data.next()
                 epochs, batch_size = self.get_epochs(data, self.params['max_steps'], batch_size)
-                encoded_data = Encoding(data, p)
+                encoded_data = Preprocessing(data, p)
                 self.build_npt(encoded_data)
                 self.build_optimizer()
                 self.build_loss_function(encoded_data)
@@ -103,7 +103,9 @@ class Trainer():
                 #true_labels = np.concatenate((data.train_data[:, -1], data.val_data[:, -1]))
                 #eval_X, eval_M = data.mask_targets('val')
                 eval_loss = self.evaluate(encoded_data, X_val, M_val, orig_val_data[:,-1])
-                print(f"time for 100 epochs is {time.time()-start} seconds")
+                print(f"time for {self.eval_steps} epochs is {time.time()-start} seconds")
+                print(f"current lr is {self.optimizer.param_groups[0]['lr']}")
+                print(f"current tradeoff is {self.loss_function.curr_tradeoff}")
                 start = time.time()
                 print(f"The evaluation metric loss on the validation set is {eval_loss} after {epoch} epochs")
                 print(f"model loss was {batch_loss} after {epoch} epochs")

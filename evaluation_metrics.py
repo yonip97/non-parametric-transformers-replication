@@ -20,7 +20,7 @@ class nll():
         self.logsoftmax =LogSoftmax(dim = 1)
 
     def compute(self,pred_labels, true_labels,mask):
-        true_labels = torch.tensor(true_labels).long()
+        #true_labels = torch.tensor(true_labels).long()
         return (torch.sum(self.loss.forward(self.logsoftmax(pred_labels),true_labels.long())*mask)/torch.sum(mask)).item()
 
 

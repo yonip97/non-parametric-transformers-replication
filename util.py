@@ -59,8 +59,13 @@ class Input_Embbeding(nn.Module):
         '''
         encodings = {}
         for col, classes in self.categorical.items():
-            encoded_col = self.one_hot_encode(X[:,col],col).to(self.device)
+            encoded_col = torch.zeros((X[:,col].shape[0],classes)).long().to(self.device)
+            #encoded_col = self.one_hot_encode(X[:,col],col).to(self.device)
             #encoded_col = torch.tensor(self.encoders[col].transform(X[:, col].view(-1,1).to_numpy()))
+            ind = X[:,col] != -1
+            to_encode = X[ind,col].long()
+            if to_encode.nelement() != 0:
+                encoded_col[ind] = F.one_hot(to_encode)
             encodings[col] = self.into_cat[str(col)](torch.cat((encoded_col, M[:, col].unsqueeze(dim=1).long()), dim=1).float())
             encodings[col] += self.index_embedding(torch.tensor(col).to(self.device)) + self.type_embedding(self.cat_index)
         for col in self.continuous:
@@ -70,8 +75,8 @@ class Input_Embbeding(nn.Module):
         encodings_list = [item[1] for item in encodings_list]
         return torch.stack(encodings_list, dim=1)
 
-    def one_hot_encode(self,data,col):
-        return torch.tensor(self.encoders[col].transform(data.view(-1, 1).cpu().numpy()))
+    # def one_hot_encode(self,data,col):
+    #     return torch.tensor(self.encoders[col].transform(data.view(-1, 1).cpu().numpy()))
 
 class Output_Encoding(nn.Module):
     def __init__(self, encoded_data, device):

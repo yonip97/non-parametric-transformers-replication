@@ -14,7 +14,7 @@ import pandas as pd
 # create mask and then transform all the columns. the training data has stocastic making while the validation and test set are static.
 # after the masks are created we randomize all entries of 2 and zero all entries of 1. while in numeric data the value is set to zero, in categorical columns the entire row is zero, no class speciped.
 
-class Encoding():
+class Preprocessing():
     def __init__(self,data,p):
         self.data = data
         self.p = p
@@ -24,11 +24,11 @@ class Encoding():
         self.continuous = data.continuous
         self.embedding_dim = data.embedding_dim
         self.input_dim = data.input_dim
-        self._encode_and_mask()
+        self._standrize_and_mask()
 
 
 
-    def _encode_and_mask(self):
+    def _standrize_and_mask(self):
         self._obtain_stats()
         self._save_original_data_tensors()
         self._create_masks_and_tensors()
@@ -48,19 +48,19 @@ class Encoding():
 
 
     def _save_original_data_tensors(self):
-        data = self.data.train_data
+        data = np.copy(self.data.train_data)
         data = data[~np.any(data == -1, axis=1)]
         for col in self.data.continuous:
             data[:,col] = (data[:,col]-self.stats[col]['mean'])/self.stats[col]['std']
         self.orig_train_tensors = torch.tensor(data, dtype=torch.float)
-        data = self.data.train_data
-        data = np.concatenate((data,self.data.val_data))
+        data = np.copy(self.data.train_data)
+        data = np.concatenate((data,np.copy(self.data.val_data)))
         for col in self.data.continuous:
             data[:, col] = (data[:, col] - self.stats[col]['mean']) / self.stats[col]['std']
         self.orig_val_tensors = torch.tensor(data, dtype=torch.float)
-        data = self.data.train_data
-        data = np.concatenate((data, self.data.val_data))
-        data = np.concatenate((data, self.data.test_data))
+        data = np.copy(self.data.train_data)
+        data = np.concatenate((data, np.copy(self.data.val_data)))
+        data = np.concatenate((data, np.copy(self.data.test_data)))
         for col in self.data.continuous:
             data[:, col] = (data[:, col] - self.stats[col]['mean']) / self.stats[col]['std']
         self.orig_test_tensors = torch.tensor(data, dtype=torch.float)
@@ -96,7 +96,7 @@ class Encoding():
     def _transform_data(self, data, mask):
         data_dict = {}
         for col in self.data.continuous:
-            temp = data[:,col]
+            temp = data[:,col].clone()
             to_zero_indices = mask[:,col] == 1
             randomize_indices = mask[:,col] == 2
             if sum(to_zero_indices) != 0:
@@ -105,7 +105,7 @@ class Encoding():
                 temp[randomize_indices] = torch.normal(mean = 0,std = 1,size = (1,sum(randomize_indices)))
             data_dict[col] = temp
         for col,classes in self.data.categorical.items():
-            temp = data[:,col].long()
+            temp = data[:,col].long().clone()
             to_zero_indices = mask[:,col] == 1
             randomize_indices = mask[:,col] == 2
             if sum(randomize_indices) != 0:
