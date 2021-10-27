@@ -1,8 +1,7 @@
 import torch
 import numpy as np
-from sklearn.preprocessing import OneHotEncoder
-from sklearn.impute import SimpleImputer
-import pandas as pd
+#from sklearn.preprocessing import OneHotEncoder
+
 
 
 
@@ -40,10 +39,10 @@ class Preprocessing():
             self.stats[col]['mean'] =np.nanmean(self.data.train_data[:,col])
             self.stats[col]['std'] = np.nanstd(self.data.train_data[:,col])
         self.encoders = {}
-        for col in self.data.categorical.keys():
-            encoder = OneHotEncoder(sparse=False,categories='auto',handle_unknown='ignore')
-            not_nan_indices = ~(self.data.train_data[:,col] == -1)
-            self.encoders[col] = encoder.fit(self.data.train_data[not_nan_indices, col].reshape(-1, 1))
+        # for col in self.data.categorical.keys():
+        #     encoder = OneHotEncoder(sparse=False,categories='auto',handle_unknown='ignore')
+        #     not_nan_indices = ~(self.data.train_data[:,col] == -1)
+        #     self.encoders[col] = encoder.fit(self.data.train_data[not_nan_indices, col].reshape(-1, 1))
 
 
 
@@ -126,6 +125,28 @@ class Preprocessing():
             return self.test_tensors,self.test_M,self.orig_test_tensors
         else:
             raise ValueError("the set must be train,val or test")
+    def test(self):
+        loss_train_mask = torch.zeros(self.orig_test_tensors.size())
+        # features = self.orig_train_tensors[:, :-1]
+        # labels = self.orig_train_tensors[:, -1]
+        #
+        # mask_features = np.random.choice(a=[0, 1, 2], size=features.size(),
+        #                                  p=[self.p.f_uc, self.p.f_mo, self.p.f_r])
+        # mask_labels = np.random.choice(a=[0, 1], size=labels.size(), p=[self.p.l_uc, self.p.l_mo])
+        # train_masking = np.concatenate((mask_features, mask_labels.reshape(-1, 1)), axis=1)
+        loss_train_mask[:self.train_M.shape[0]] = self.train_M
+        train_mask = loss_train_mask.clone()
+        train_mask[self.train_M.shape[0]:,-1] = 1
+        loss_val_mask = torch.zeros(self.orig_test_tensors.size())
+        loss_val_mask[:self.val_M.shape[0]] = self.val_M
+        val_mask = loss_val_mask.clone()
+        val_mask[self.val_M.shape[0]:,-1] = 1
+        train_X,train_M = self._transform_data(self.orig_test_tensors,train_mask)
+        val_X,val_M = self._transform_data(self.orig_test_tensors,val_mask)
+        return train_X,train_M,loss_train_mask,val_X,val_M,loss_val_mask,self.orig_test_tensors
+
+        # M = torch.zeros(self.orig_test_tensors.shape())
+        # M[:,-1] = 1
 
     # def create_masks(self):
     #     features = self.orig_train_tensor[:,:-1]

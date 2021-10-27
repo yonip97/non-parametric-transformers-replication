@@ -75,8 +75,8 @@ class Input_Embbeding(nn.Module):
         encodings_list = [item[1] for item in encodings_list]
         return torch.stack(encodings_list, dim=1)
 
-    # def one_hot_encode(self,data,col):
-    #     return torch.tensor(self.encoders[col].transform(data.view(-1, 1).cpu().numpy()))
+    def one_hot_encode(self,data,col):
+        return torch.tensor(self.encoders[col].transform(data.view(-1, 1).cpu().numpy()))
 
 class Output_Encoding(nn.Module):
     def __init__(self, encoded_data, device):

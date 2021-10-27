@@ -49,14 +49,26 @@ class Loss():
             sum_label_loss = (M[:,self.target]* self.mse_loss.forward(pred[self.target], orig_data[:, self.target])).sum()
         losses["predictions"][self.target] = M[:,self.target].sum()
         sum_feature_loss = torch.sum(torch.stack(list(losses["losses"]["features"].values()),0))
-        if self.init_tradeoff == -1:
-            loss = (sum_feature_loss+sum_label_loss) /torch.sum(torch.stack(list(losses['predictions'].values()),0))
-        else:
-            label_predictions = losses['predictions'].pop(self.target)
+        #loss = (sum_feature_loss+sum_label_loss) /torch.sum(torch.stack(list(losses['predictions'].values()),0))
+        label_predictions = losses['predictions'].pop(self.target)
+        features_predictions = torch.sum(torch.stack(list(losses['predictions'].values()),0))
+        if label_predictions != 0:
             label_loss = sum_label_loss / label_predictions
-            feature_loss = sum_feature_loss / torch.sum(torch.stack(list(losses['predictions'].values()),0))
-            loss = self.curr_tradeoff * feature_loss + (1 - self.curr_tradeoff) * label_loss
+            if features_predictions != 0:
+                feature_loss = sum_feature_loss / features_predictions
+                loss = self.curr_tradeoff * feature_loss + (1 - self.curr_tradeoff) * label_loss
+            else:
+                loss = (1 - self.curr_tradeoff) * label_loss
+        else:
+            if features_predictions != 0:
+                feature_loss = sum_feature_loss / features_predictions
+                loss = self.curr_tradeoff * feature_loss
+            else:
+                loss = torch.tensor(0)
         return loss
+        #
+        # feature_loss = sum_feature_loss / torch.sum(torch.stack(list(losses['predictions'].values()),0))
+        # loss = self.curr_tradeoff * feature_loss + (1 - self.curr_tradeoff) * label_loss
         # label_loss = self.losses.pop(self.label_col, None)
         # features_loss = torch.sum(torch.stack(list(losses.values())))
         # return (1 - self.curr_tradeoff) * label_loss + self.curr_tradeoff * features_loss

@@ -25,7 +25,7 @@ def main():
     batch_size = -1
     init_tradeoff = 1
     params_dict = {'max_steps':max_steps,'lr':lr,'betas':betas,'eps':eps,'flat':flat,'k':k,'alpha':alpha,'model_layers':model_layers,'rff':rff_layers,'heads':model_heads,'drop':drop_out,'init_tradeoff':init_tradeoff}
-    trainer = Trainer(params_dict=params_dict,eval_metric=nll(),eval_every_n_th_epoch=100,data=data,device=device,clip=1)
+    trainer = Trainer(params_dict=params_dict,eval_metric=nll(),eval_every_n_th_epoch=1,device=device,clip=1)
     trainer.run(data,p,batch_size,cv)
 
 

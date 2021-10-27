@@ -13,9 +13,9 @@ from loss import Loss
 from lookahead import Lookahead
 from lamb import Lamb
 from preprocessing import Preprocessing
-
+from model_caching import  Model_Cacher
 class Trainer():
-    def __init__(self, params_dict, eval_metric, eval_every_n_th_epoch,data, device, clip=None,
+    def __init__(self, params_dict, eval_metric, eval_every_n_th_epoch, device, clip=None,
                  lr_scheduler='flat_then_anneal', tradeoff_scheduler='cosine'):
         self.params = params_dict
         self.eval_metric = eval_metric
@@ -65,6 +65,7 @@ class Trainer():
 
     def run_training(self, data,p, batch_size, cv=None):
         if cv == None:
+            self.model_cacher = Model_Cacher(data,cv)
             epochs, batch_size = self.get_epochs(data, self.params['max_steps'], batch_size)
             encoded_data = Preprocessing(data, p)
             self.build_npt(encoded_data)
@@ -80,6 +81,7 @@ class Trainer():
                 data.next()
                 epochs, batch_size = self.get_epochs(data, self.params['max_steps'], batch_size)
                 encoded_data = Preprocessing(data, p)
+                self.model_cacher = Model_Cacher(data, i)
                 self.build_npt(encoded_data)
                 self.build_optimizer()
                 self.build_loss_function(encoded_data)
@@ -100,18 +102,25 @@ class Trainer():
                 batch_X, batch_M, batch_real_data = batch_data
                 batch_loss = self.pass_through(batch_X, batch_M, batch_real_data)
             if epoch % self.eval_steps == 0:
-                #true_labels = np.concatenate((data.train_data[:, -1], data.val_data[:, -1]))
-                #eval_X, eval_M = data.mask_targets('val')
-                eval_loss = self.evaluate(encoded_data, X_val, M_val, orig_val_data[:,-1])
+                self.model.eval()
+                eval_loss = self.pass_through(X_val.to(self.device), M_val.to(self.device), orig_val_data.to(self.device))
+                self.model_cacher.check_improvement(self.model,eval_loss,epoch)
+                self.model.train()
                 print(f"time for {self.eval_steps} epochs is {time.time()-start} seconds")
                 print(f"current lr is {self.optimizer.param_groups[0]['lr']}")
-                print(f"current tradeoff is {self.loss_function.curr_tradeoff}")
                 start = time.time()
                 print(f"The evaluation metric loss on the validation set is {eval_loss} after {epoch} epochs")
                 print(f"model loss was {batch_loss} after {epoch} epochs")
 
     def pass_through(self, batch_X, batch_M, batch_real_data):
         z = self.model.forward(batch_X, batch_M)
+        if self.model.training:
+            batch_loss = self.step(z, batch_M, batch_real_data)
+        else:
+            batch_loss = self.eval_model()
+        return batch_loss.item()
+
+    def step(self, z, batch_M, batch_real_data):
         batch_loss = self.loss_function.compute(z, batch_real_data, batch_M)
         batch_loss.backward()
         self.optimizer.step()
@@ -120,14 +129,13 @@ class Trainer():
         if self.tradeoff_scheduler == 'cosine':
             self.loss_function.Scheduler_cosine_step()
         self.optimizer.zero_grad()
-        return batch_loss.item()
+    def eval_model(self):
 
     def evaluate(self, data, eval_X, eval_M, true_labels):
         self.model.eval()
         with torch.no_grad():
             z = self.model.forward(eval_X.to(self.device), eval_M.to(self.device))
             pred = z[data.target_col].detach().cpu()
-            # eval_acc = acc.compute(pred,true_labels,eval_M[:,-1])
             if data.target_type =='continuous':
                 pred *= data.stats[data.target_col]['std']
                 pred += data.stats[data.target_col]['mean']
@@ -138,6 +146,7 @@ class Trainer():
         return eval_loss
 
     def test(self,data):
+        self.model =self.model_cacher.load_model(self.model)
         X_test, M_test,orig_test_tensors = data.get('test')
         test_eval = self.evaluate(data, X_test, M_test, orig_test_tensors[:,-1])
         return test_eval

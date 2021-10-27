@@ -143,6 +143,7 @@ class income_dataset(base_dataset):
         self.target_col = 41
         self.target_type = 'categorical'
         self.p = p
+        self.name = 'income_dataset'
         if cv !=None:
             self._cv_split(cv)
 
@@ -165,6 +166,7 @@ class poker_dataset(base_dataset):
         self.target_col = 10
         self.target_type = 'categorical'
         self.p = p
+        self.name = 'poker_dataset'
         if cv != None:
             self._cv_split(cv)
 
@@ -183,6 +185,7 @@ class boson_housing_dataset(base_dataset):
         self.target_col = 13
         self.target_type = 'continuous'
         self.p = p
+        self.name= 'boston_housing_dataset'
         if cv != None:
             self._cv_split(cv)
 
@@ -197,6 +200,7 @@ class forest_cover_dataset(base_dataset):
         self.target_col = 54
         self.target_type = 'categorical'
         self.p = p
+        self.name = 'forest_cover_dataset'
         if cv != None:
             self._cv_split(cv)
 
@@ -215,6 +219,7 @@ class higgs_boston_dataset(base_dataset):
         self.target_col = 28
         self.target_type = 'categorical'
         self.p = p
+        self.name = 'higgs_boston_dataset'
         if cv != None:
             self._cv_split(cv)
 
@@ -234,6 +239,7 @@ class kick_dataset(base_dataset):
         self.target_col = 32
         self.target_type = 'categorical'
         self.p = p
+        self.name = 'kick_dataset'
         if cv != None:
             self._cv_split(cv)
 
@@ -251,6 +257,7 @@ class breast_cancer_dataset(base_dataset):
         self.target_col = 30
         self.target_type = 'categorical'
         self.p = p
+        self.name = 'breast_cancer_dataset'
         if cv != None:
             self._cv_split(cv)
 
@@ -267,6 +274,7 @@ class protein_dataset(base_dataset):
         self.target_col = 9
         self.target_type = 'continuous'
         self.p = p
+        self.name = 'protein_dataset'
         if cv != None:
             self._cv_split(cv)
 
@@ -281,6 +289,7 @@ class concrete_dataset(base_dataset):
         self.target_col = 8
         self.target_type = 'continuous'
         self.p = p
+        self.name = 'concrete_dataset'
         if cv != None:
             self._cv_split(cv)
 
@@ -297,6 +306,7 @@ class yacht_dataset(base_dataset):
         self.target_col = 6
         self.target_type = 'continuous'
         self.p = p
+        self.name = 'yacht_dataset'
         if cv != None:
             self._cv_split(cv)
 
