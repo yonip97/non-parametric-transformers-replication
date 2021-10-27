@@ -1,9 +1,5 @@
-import math
-import time
-from collections import defaultdict
 import torch
 import numpy as np
-#from torch.optim.lr_scheduler import CosineAnnealingLr
 
 class Loss():
     def __init__(self, data, max_steps,tradeoff = 1):
@@ -35,22 +31,32 @@ class Loss():
         self.steps_taken = 0
 
 
+    def compute_column_loss_and_predictions(self,pred,orig,mask,is_cat):
+        predictions = mask.sum()
+        if is_cat:
+            loss = (mask * self.cross_entropy_loss.forward(pred, orig.long())).sum()
+        else:
+            loss = (mask *self.mse_loss.forward(pred,orig)).sum()
+        return predictions,loss
+
     def compute(self, pred, orig_data, M):
         losses = {'losses': {"features": dict()}, "predictions": dict()}
         for col in self.categorical.keys():
-            losses["predictions"][col] = M[:,col].sum()
-            losses["losses"]["features"][col] =(M[:,col] *self.cross_entropy_loss.forward(pred[col],orig_data[:,col].long())).sum()
+            losses["predictions"][col] ,losses["losses"]["features"][col]= self.compute_column_loss_and_predictions(pred[col],orig_data[:,col],M[:,col],True)
+            # losses["predictions"][col] = M[:,col].sum()
+            # losses["losses"]["features"][col] =(M[:,col] *self.cross_entropy_loss.forward(pred[col],orig_data[:,col].long())).sum()
         for col in self.continuous:
-            losses["predictions"][col] = M[:, col].sum()
-            losses["losses"]["features"][col] =(M[:,col]* self.mse_loss.forward(pred[col], orig_data[:, col])).sum()
+            losses["predictions"][col],losses["losses"]["features"][col] = self.compute_column_loss_and_predictions(pred[col], orig_data[:, col], M[:, col], False)
+            # losses["predictions"][col] = M[:, col].sum()
+            # losses["losses"]["features"][col] =(M[:,col]* self.mse_loss.forward(pred[col], orig_data[:, col])).sum()
         if self.target_type =='categorical':
-            sum_label_loss = (M[:,self.target] *self.cross_entropy_loss.forward(pred[self.target],orig_data[:,self.target].long())).sum()
+            label_predictions,sum_label_loss = self.compute_column_loss_and_predictions(pred[self.target],orig_data[:,self.target],M[:,self.target],True)
+            #sum_label_loss = (M[:,self.target] *self.cross_entropy_loss.forward(pred[self.target],orig_data[:,self.target].long())).sum()
         else:
-            sum_label_loss = (M[:,self.target]* self.mse_loss.forward(pred[self.target], orig_data[:, self.target])).sum()
-        losses["predictions"][self.target] = M[:,self.target].sum()
+            label_predictions, sum_label_loss = self.compute_column_loss_and_predictions(pred[self.target],orig_data[:,self.target],M[:,self.target],False)
+            #sum_label_loss = (M[:,self.target]* self.mse_loss.forward(pred[self.target], orig_data[:, self.target])).sum()
+        #losses["predictions"][self.target] = M[:,self.target].sum()
         sum_feature_loss = torch.sum(torch.stack(list(losses["losses"]["features"].values()),0))
-        #loss = (sum_feature_loss+sum_label_loss) /torch.sum(torch.stack(list(losses['predictions'].values()),0))
-        label_predictions = losses['predictions'].pop(self.target)
         features_predictions = torch.sum(torch.stack(list(losses['predictions'].values()),0))
         if label_predictions != 0:
             label_loss = sum_label_loss / label_predictions
@@ -66,13 +72,6 @@ class Loss():
             else:
                 loss = torch.tensor(0)
         return loss
-        #
-        # feature_loss = sum_feature_loss / torch.sum(torch.stack(list(losses['predictions'].values()),0))
-        # loss = self.curr_tradeoff * feature_loss + (1 - self.curr_tradeoff) * label_loss
-        # label_loss = self.losses.pop(self.label_col, None)
-        # features_loss = torch.sum(torch.stack(list(losses.values())))
-        # return (1 - self.curr_tradeoff) * label_loss + self.curr_tradeoff * features_loss
-
 
     def Scheduler_cosine_step(self):
         if self.steps_taken <= self.max_steps:
@@ -82,7 +81,21 @@ class Loss():
             self.curr_tradeoff = 0
         self.steps_taken += 1
 
-    def finalize_loss(self):
-        defaultdict(dict)
+    def val_loss(self,pred,orig_data,mask):
+        '''
+        :param pred: the predicated values
+        :param orig_data: original values
+        :param mask: relevant targets
+        :return: validation loss no tradeoff
+        '''
+        if self.target_type =='categorical':
+            label_predictions,sum_label_loss = self.compute_column_loss_and_predictions(pred[self.target],orig_data[:,self.target],mask[:,self.target],True)
+        else:
+            label_predictions, sum_label_loss = self.compute_column_loss_and_predictions(pred[self.target],orig_data[:,self.target],mask[:,self.target],False)
+        if label_predictions != 0:
+            return sum_label_loss/label_predictions
+        else:
+            return torch.tensor(0)
+
 
 

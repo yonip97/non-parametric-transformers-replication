@@ -1,3 +1,5 @@
+import torch
+
 from build_datasets import *
 from util import probs
 from evaluation_metrics import *
@@ -5,6 +7,8 @@ from training_constractor import Trainer
 
 
 def main():
+    torch.manual_seed(42)
+    np.random.seed(42)
     cv = 10
     p = probs(0.15,1)
     data = breast_cancer_dataset(embedding_dim=32,p = p,cv= cv)

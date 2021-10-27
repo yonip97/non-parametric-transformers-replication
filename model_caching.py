@@ -6,7 +6,7 @@ import datetime
 import glob
 
 class Model_Cacher():
-    def __init__(self,dataset,cv = None):
+    def __init__(self,dataset,cv = None,improvements_necessary= 1):
         self.min_val_loss = float('inf')
         parent_path = '/home/yehonatan-pe/replication/model_checkpoints/'
         dataset_name = dataset.name
@@ -21,18 +21,26 @@ class Model_Cacher():
         os.mkdir(path)
         self.caching_path = path
         self.best_model = None
+        self.improvements_necessary = improvements_necessary
+        self.improvements_since_last_caching = 0
 
 
     def check_improvement(self,model,val_loss,epoch):
         if self.min_val_loss > val_loss:
-            print("improvement")
-            path = os.path.join(self.caching_path,'*')
-            files = glob.glob(path)
-            for file in files:
-                os.remove(file)
-            path = os.path.join(self.caching_path,str(epoch))
-            self.best_model = path
-            torch.save(model.state_dict(), path)
-            self.min_val_loss = val_loss
+            self.improvements_since_last_caching +=1
+            print("Improvement in  the model")
+            if self.improvements_since_last_caching >= self.improvements_necessary:
+                print("Caching model")
+                path = os.path.join(self.caching_path,'*')
+                files = glob.glob(path)
+                for file in files:
+                    os.remove(file)
+                path = os.path.join(self.caching_path,str(epoch))
+                self.best_model = path
+                torch.save(model.state_dict(), path)
+                self.min_val_loss = val_loss
+                self.improvements_since_last_caching = 0
+
     def load_model(self,model):
-        return model.load_state_dict(torch.load(self.best_model))
+        #return model.load(self.best_model)
+        model.load_state_dict(torch.load(self.best_model))

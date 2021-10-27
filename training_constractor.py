@@ -106,18 +106,19 @@ class Trainer():
                 eval_loss = self.pass_through(X_val.to(self.device), M_val.to(self.device), orig_val_data.to(self.device))
                 self.model_cacher.check_improvement(self.model,eval_loss,epoch)
                 self.model.train()
-                print(f"time for {self.eval_steps} epochs is {time.time()-start} seconds")
-                print(f"current lr is {self.optimizer.param_groups[0]['lr']}")
+                print(f"Time for {self.eval_steps} epochs is {time.time()-start:.3f} seconds")
+                print(f"Current lr is {self.optimizer.param_groups[0]['lr']:.6f}")
                 start = time.time()
-                print(f"The evaluation metric loss on the validation set is {eval_loss} after {epoch} epochs")
-                print(f"model loss was {batch_loss} after {epoch} epochs")
+                print(f"The validation loss is {eval_loss:.3f} after {epoch} epochs")
+                #print(f"The  metric loss on the validation set is {eval_loss} after {epoch} epochs")
+                print(f"Model loss was {batch_loss:.3f} after {epoch} epochs")
 
     def pass_through(self, batch_X, batch_M, batch_real_data):
         z = self.model.forward(batch_X, batch_M)
         if self.model.training:
             batch_loss = self.step(z, batch_M, batch_real_data)
         else:
-            batch_loss = self.eval_model()
+            batch_loss = self.eval_model(z, batch_M, batch_real_data)
         return batch_loss.item()
 
     def step(self, z, batch_M, batch_real_data):
@@ -129,7 +130,11 @@ class Trainer():
         if self.tradeoff_scheduler == 'cosine':
             self.loss_function.Scheduler_cosine_step()
         self.optimizer.zero_grad()
-    def eval_model(self):
+        return batch_loss
+
+    def eval_model(self,z, batch_M, batch_real_data):
+        return self.loss_function.val_loss(z,batch_real_data,batch_M)
+
 
     def evaluate(self, data, eval_X, eval_M, true_labels):
         self.model.eval()
@@ -146,7 +151,7 @@ class Trainer():
         return eval_loss
 
     def test(self,data):
-        self.model =self.model_cacher.load_model(self.model)
+        self.model_cacher.load_model(self.model)
         X_test, M_test,orig_test_tensors = data.get('test')
         test_eval = self.evaluate(data, X_test, M_test, orig_test_tensors[:,-1])
         return test_eval
