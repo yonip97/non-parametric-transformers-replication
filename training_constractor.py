@@ -13,20 +13,23 @@ from loss import Loss
 from lookahead import Lookahead
 from lamb import Lamb
 from preprocessing import Preprocessing
-from model_caching import  Model_Cacher
+from run_documentation import run_logger
+from util import probs
 class Trainer():
-    def __init__(self, params_dict, eval_metric, eval_every_n_th_epoch, device, clip=None,
+    def __init__(self, params_dict, eval_metric,data, device,
                  lr_scheduler='flat_then_anneal', tradeoff_scheduler='cosine'):
         self.params = params_dict
         self.eval_metric = eval_metric
-        self.eval_steps = eval_every_n_th_epoch
-        if clip != None:
-            self.clip = clip
-        else:
-            self.clip = None
+        self.eval_steps = params_dict['eval_every_n_th_epoch']
+        self.clip = params_dict['clip']
+        self.cv = params_dict['cv']
+        self.p = probs(params_dict['features_mask_prob'],params_dict['label_mask_prob'])
         self.lr_scheduler = lr_scheduler
         self.tradeoff_scheduler = tradeoff_scheduler
         self.device = device
+        self.run_logger = run_logger(data)
+        self.cacher_improvements_necessary =params_dict['improvements_necessary']
+        self.run_logger.record_hyperparameters(params_dict)
 
     def build_npt(self,encoded_data):
         self.model = NPT(encoded_data,self.params['model_layers'], self.params['heads'], self.params['rff'], self.device,
@@ -53,44 +56,57 @@ class Trainer():
             epochs = math.ceil(max_steps / steps_per_epoch)
             return epochs, batch_size
 
-    def run(self,data,p,batch_size,cv = None,test = None):
+    def run(self,data,batch_size,cv = None,test = None):
         if test == None:
-            self.run_training(data,p,batch_size,cv)
+            self.run_training(data,batch_size,cv)
         elif test == 'duplicate':
-            self.run_duplicate(data,p,batch_size, cv)
+            self.run_duplicate(data,batch_size, cv)
         elif test == 'corruption':
-            self.run_corroption(data,p,batch_size,cv)
+            self.run_corroption(data,batch_size,cv)
         elif test == 'deletion':
-            self.run_deletion(data,p,batch_size,cv)
+            self.run_deletion(data,batch_size,cv)
 
-    def run_training(self, data,p, batch_size, cv=None):
+    def run_training(self, data, batch_size, cv=None):
+        # self.run_logger = run_logger(data)
         if cv == None:
-            self.model_cacher = Model_Cacher(data,cv)
-            epochs, batch_size = self.get_epochs(data, self.params['max_steps'], batch_size)
-            encoded_data = Preprocessing(data, p)
+            self.run_logger.define_cacher(improvements_necessary=self.cacher_improvements_necessary)
+            #self.model_cacher = Model_Cacher(data,cv)
+            epochs, run_batch_size = self.get_epochs(data, self.params['max_steps'], batch_size)
+            encoded_data = Preprocessing(data, self.p)
             self.build_npt(encoded_data)
             self.build_optimizer()
             self.build_loss_function(encoded_data)
-            self.train(encoded_data,epochs,batch_size)
-            test_eval = self.test(encoded_data)
-            print(f"The evaluation metric loss on the test set is {test_eval}")
-            return test_eval
+            self.train(encoded_data,epochs,run_batch_size)
+            test_results = self.test(encoded_data)
+            print(f"The evaluation metric loss on the test set is {test_results:.4f}")
+            test_results = np.array(test_results)
         else:
-            test_evals = []
-            for i in range(cv):
+            test_results = []
+            for i in range(1,cv+1):
+                print(f"Cross validation at split {i}/{cv}")
                 data.next()
-                epochs, batch_size = self.get_epochs(data, self.params['max_steps'], batch_size)
-                encoded_data = Preprocessing(data, p)
-                self.model_cacher = Model_Cacher(data, i)
+                epochs, run_batch_size = self.get_epochs(data, self.params['max_steps'], batch_size)
+                encoded_data = Preprocessing(data, self.p)
+                self.run_logger.define_cacher(cv=i,improvements_necessary=self.cacher_improvements_necessary)
+                #self.model_cacher = Model_Cacher(data, i)
                 self.build_npt(encoded_data)
                 self.build_optimizer()
                 self.build_loss_function(encoded_data)
-                self.train(encoded_data,epochs,batch_size)
+                self.train(encoded_data,epochs,run_batch_size)
                 test_eval = self.test(encoded_data)
-                print(f"The evaluation metric loss on the test set is {test_eval}")
-                test_evals.append(test_eval)
-            return np.array(test_evals)
+                print(f"The evaluation metric loss on the test set is {test_eval:.4f}")
+                test_results.append(test_eval)
+            test_results = np.array(test_results)
+        self.calculate_and_save_results(test_results)
 
+    def calculate_and_save_results(self,results):
+        printable_results = f'''
+        Run results are:
+        The mean of the results is {results.mean():.4f}
+        The std of the results is {results.std():.4f}
+        '''
+        print(printable_results)
+        self.run_logger.save_run_results(printable_results)
     def train(self, encoded_data,epochs, batch_size):
         X_train,M_train,orig_train_data = encoded_data.get('train')
         X_val,M_val,orig_val_data = encoded_data.get('val')
@@ -104,7 +120,7 @@ class Trainer():
             if epoch % self.eval_steps == 0:
                 self.model.eval()
                 eval_loss = self.pass_through(X_val.to(self.device), M_val.to(self.device), orig_val_data.to(self.device))
-                self.model_cacher.check_improvement(self.model,eval_loss,epoch)
+                self.run_logger.check_improvement(self.model,eval_loss,epoch)
                 self.model.train()
                 print(f"Time for {self.eval_steps} epochs is {time.time()-start:.3f} seconds")
                 print(f"Current lr is {self.optimizer.param_groups[0]['lr']:.6f}")
@@ -151,7 +167,7 @@ class Trainer():
         return eval_loss
 
     def test(self,data):
-        self.model_cacher.load_model(self.model)
+        self.run_logger.load_model(self.model)
         X_test, M_test,orig_test_tensors = data.get('test')
         test_eval = self.evaluate(data, X_test, M_test, orig_test_tensors[:,-1])
         return test_eval

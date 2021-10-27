@@ -6,40 +6,34 @@ import datetime
 import glob
 
 class Model_Cacher():
-    def __init__(self,dataset,cv = None,improvements_necessary= 1):
+    def __init__(self,path,improvements_necessary):
         self.min_val_loss = float('inf')
-        parent_path = '/home/yehonatan-pe/replication/model_checkpoints/'
-        dataset_name = dataset.name
-        path = os.path.join(parent_path, dataset_name)
-        run_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        if not os.path.exists(path):
-            os.mkdir(path)
-        path = os.path.join(path,run_time)
-        os.mkdir(path)
-        if cv is not None:
-            path = os.path.join(path, str(cv))
-        os.mkdir(path)
         self.caching_path = path
         self.best_model = None
         self.improvements_necessary = improvements_necessary
         self.improvements_since_last_caching = 0
 
-
-    def check_improvement(self,model,val_loss,epoch):
+    def check_if_cache(self, val_loss):
         if self.min_val_loss > val_loss:
             self.improvements_since_last_caching +=1
             print("Improvement in  the model")
             if self.improvements_since_last_caching >= self.improvements_necessary:
-                print("Caching model")
-                path = os.path.join(self.caching_path,'*')
-                files = glob.glob(path)
-                for file in files:
-                    os.remove(file)
-                path = os.path.join(self.caching_path,str(epoch))
-                self.best_model = path
-                torch.save(model.state_dict(), path)
-                self.min_val_loss = val_loss
-                self.improvements_since_last_caching = 0
+                #print("Caching model")
+                return True
+        return False
+
+    def cache(self,model,val_loss,epoch):
+        print("Deleting previous weights")
+        path = os.path.join(self.caching_path,'*')
+        files = glob.glob(path)
+        for file in files:
+            os.remove(file)
+        print("Caching model")
+        path = os.path.join(self.caching_path,str(epoch)+'.pt')
+        self.best_model = path
+        torch.save(model.state_dict(), path)
+        self.min_val_loss = val_loss
+        self.improvements_since_last_caching = 0
 
     def load_model(self,model):
         #return model.load(self.best_model)

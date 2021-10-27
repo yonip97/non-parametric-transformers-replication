@@ -7,30 +7,44 @@ from training_constractor import Trainer
 
 
 def main():
-    torch.manual_seed(42)
-    np.random.seed(42)
-    cv = 10
-    p = probs(0.15,1)
-    data = breast_cancer_dataset(embedding_dim=32,p = p,cv= cv)
-    device = 'cpu'
-    if torch.cuda.is_available():
-        device = 'cuda'
-    max_steps = 2000
-    lr = 5e-4
-    betas = (0.9,0.99)
-    eps = 1e-6
-    flat = 0.5
-    k = 6
-    alpha = 0.5
-    model_layers = 4
-    model_heads = 8
-    rff_layers = 1
-    drop_out = 0.1
-    batch_size = -1
-    init_tradeoff = 1
-    params_dict = {'max_steps':max_steps,'lr':lr,'betas':betas,'eps':eps,'flat':flat,'k':k,'alpha':alpha,'model_layers':model_layers,'rff':rff_layers,'heads':model_heads,'drop':drop_out,'init_tradeoff':init_tradeoff}
-    trainer = Trainer(params_dict=params_dict,eval_metric=nll(),eval_every_n_th_epoch=1,device=device,clip=1)
-    trainer.run(data,p,batch_size,cv)
+    for seed in np.random.randint(0,100,size=4).tolist():
+        torch_seed = seed
+        numpy_seed = seed
+        torch.manual_seed(torch_seed)
+        np.random.seed(numpy_seed)
+        dataset = 'breast_cancer'
+        label_mask_prob = 1
+        features_mask_prob = 0.15
+        cv = 10
+        data = breast_cancer_dataset(embedding_dim=32,cv= cv)
+        device = 'cpu'
+        if torch.cuda.is_available():
+            device = 'cuda'
+        max_steps = 2000
+        lr = 5e-4
+        betas = (0.9,0.99)
+        eps = 1e-6
+        flat = 0.5
+        k = 6
+        alpha = 0.5
+        model_layers = 4
+        model_heads = 8
+        rff_layers = 1
+        drop_out = 0.1
+        batch_size = -1
+        init_tradeoff = 1
+        clip = 1
+        eval_every_n_th_epoch = 1
+        improvements_necessary = 1
+        params_dict = {'max_steps':max_steps,'lr':lr,'betas':betas,'eps':eps
+                        ,'flat':flat,'k':k,'alpha':alpha,'model_layers':model_layers,'rff':rff_layers,
+                       'heads':model_heads,'drop':drop_out,'batch_size':batch_size,'init_tradeoff':init_tradeoff,
+                       'clip':clip,'eval_every_n_th_epoch':eval_every_n_th_epoch,'dataset':dataset,
+                       'label_mask_prob':label_mask_prob,'features_mask_prob':features_mask_prob,'cv':cv,
+                       'torch_seed':torch_seed,'numpy_seed':numpy_seed,'evaluation_metric':'nll',
+                       'improvements_necessary':improvements_necessary}
+        trainer = Trainer(params_dict=params_dict,eval_metric=nll(),data=data,device=device)
+        trainer.run(data,batch_size,cv)
 
 
 

@@ -67,73 +67,73 @@ class base_dataset():
 
 
 
-    def create_training_mask(self):
-        '''
-        unchanged value get mask value of 0.
-        masked out value of 1
-        randomized value of 2
-        :return:
-        '''
-        features = np.copy(self.train_data[:,:-1])
-        labels = np.copy(self.train_data[:,-1])
-        flat_features = features.flatten()
-        feature_mask = np.full(flat_features.shape,1)
-        mask_features = np.random.choice(a=[0,1,2], size=np.count_nonzero(~np.isnan(flat_features)),
-                                        p=[self.p.f_uc,self.p.f_mo, self.p.f_r])
-        feature_mask[~np.isnan(flat_features)] = mask_features
-        feature_mask = feature_mask.reshape(features.shape)
-        flat_labels = labels.flatten()
-        labels_mask = np.full(flat_labels.shape,1)
-        mask_labels = np.random.choice(a=[0,1], size=np.count_nonzero(~np.isnan(flat_labels)),
-                                       p=[self.p.l_uc,self.p.l_mo])
-        labels_mask[~np.isnan(flat_labels)] = mask_labels
-        labels_mask = labels_mask.reshape(labels.shape)
-        features[feature_mask == 1] = 0
-        feature_indices = feature_mask == 2
-        if self.target_type == 'categorical':
-            labels_classes = self.categorical.pop(self.target_col, None)
-        else:
-            self.continuous.remove(self.target_col)
-        for category in self.continuous:
-            arr_size = np.count_nonzero(feature_indices[:, category] == True)
-            features[feature_indices[:, category], category] = np.random.normal(0, 1, arr_size)
-        for category, classes in self.categorical.items():
-            arr_size = np.count_nonzero(feature_indices[:, category] == True)
-            features[feature_indices[:, category], category] = np.random.randint(low=0, high=classes, size=arr_size)
-        labels[labels_mask == 1] = 0
-        if self.target_type == 'categorical':
-            self.categorical[self.target_col] = labels_classes
-        else:
-            self.continuous.append(self.target_col)
-        X = np.hstack((features, labels.reshape((-1, 1))))
-        mask = np.hstack((feature_mask, labels_mask.reshape((-1, 1))))
-        M = mask == 1
-        return torch.tensor(X,dtype=torch.float), torch.tensor(M,dtype=torch.float)
-
-
-    def mask_targets(self,set):
-        val_data = np.copy(self.val_data)
-        val_M = np.zeros(self.val_data.shape)
-        train_data = np.copy(self.train_data)
-        train_M = np.zeros(self.train_data.shape)
-        if set == 'val':
-            val_data[:,-1] = 0
-            val_M[:,-1] = 1
-            X = np.concatenate((train_data,val_data))
-            M = np.concatenate((train_M,val_M))
-        else:
-            test_data = np.copy(self.test_data)
-            test_M = np.zeros(self.test_data.shape)
-            test_data[:,-1] = 0
-            test_M[:,-1] = 1
-            X = np.concatenate((train_data,val_data,test_data))
-            M = np.concatenate((train_M,val_M,test_M))
-        return torch.tensor(X,dtype=torch.float), torch.tensor(M,dtype=torch.float)
-
+    # def create_training_mask(self):
+    #     '''
+    #     unchanged value get mask value of 0.
+    #     masked out value of 1
+    #     randomized value of 2
+    #     :return:
+    #     '''
+    #     features = np.copy(self.train_data[:,:-1])
+    #     labels = np.copy(self.train_data[:,-1])
+    #     flat_features = features.flatten()
+    #     feature_mask = np.full(flat_features.shape,1)
+    #     mask_features = np.random.choice(a=[0,1,2], size=np.count_nonzero(~np.isnan(flat_features)),
+    #                                     p=[self.p.f_uc,self.p.f_mo, self.p.f_r])
+    #     feature_mask[~np.isnan(flat_features)] = mask_features
+    #     feature_mask = feature_mask.reshape(features.shape)
+    #     flat_labels = labels.flatten()
+    #     labels_mask = np.full(flat_labels.shape,1)
+    #     mask_labels = np.random.choice(a=[0,1], size=np.count_nonzero(~np.isnan(flat_labels)),
+    #                                    p=[self.p.l_uc,self.p.l_mo])
+    #     labels_mask[~np.isnan(flat_labels)] = mask_labels
+    #     labels_mask = labels_mask.reshape(labels.shape)
+    #     features[feature_mask == 1] = 0
+    #     feature_indices = feature_mask == 2
+    #     if self.target_type == 'categorical':
+    #         labels_classes = self.categorical.pop(self.target_col, None)
+    #     else:
+    #         self.continuous.remove(self.target_col)
+    #     for category in self.continuous:
+    #         arr_size = np.count_nonzero(feature_indices[:, category] == True)
+    #         features[feature_indices[:, category], category] = np.random.normal(0, 1, arr_size)
+    #     for category, classes in self.categorical.items():
+    #         arr_size = np.count_nonzero(feature_indices[:, category] == True)
+    #         features[feature_indices[:, category], category] = np.random.randint(low=0, high=classes, size=arr_size)
+    #     labels[labels_mask == 1] = 0
+    #     if self.target_type == 'categorical':
+    #         self.categorical[self.target_col] = labels_classes
+    #     else:
+    #         self.continuous.append(self.target_col)
+    #     X = np.hstack((features, labels.reshape((-1, 1))))
+    #     mask = np.hstack((feature_mask, labels_mask.reshape((-1, 1))))
+    #     M = mask == 1
+    #     return torch.tensor(X,dtype=torch.float), torch.tensor(M,dtype=torch.float)
+    #
+    #
+    # def mask_targets(self,set):
+    #     val_data = np.copy(self.val_data)
+    #     val_M = np.zeros(self.val_data.shape)
+    #     train_data = np.copy(self.train_data)
+    #     train_M = np.zeros(self.train_data.shape)
+    #     if set == 'val':
+    #         val_data[:,-1] = 0
+    #         val_M[:,-1] = 1
+    #         X = np.concatenate((train_data,val_data))
+    #         M = np.concatenate((train_M,val_M))
+    #     else:
+    #         test_data = np.copy(self.test_data)
+    #         test_M = np.zeros(self.test_data.shape)
+    #         test_data[:,-1] = 0
+    #         test_M[:,-1] = 1
+    #         X = np.concatenate((train_data,val_data,test_data))
+    #         M = np.concatenate((train_M,val_M,test_M))
+    #     return torch.tensor(X,dtype=torch.float), torch.tensor(M,dtype=torch.float)
+    #
 
 
 class income_dataset(base_dataset):
-    def __init__(self,embedding_dim = 64,p = probs(0.15,0.15),cv = None):
+    def __init__(self,embedding_dim = 64,cv = None):
         path = '/data/shared-data/UCI-income/income_data/census-income.csv'
         df = pd.read_csv(path)
         self.split = {'train': 0.57, 'val': 0.1, 'test': 0.33}
@@ -142,7 +142,6 @@ class income_dataset(base_dataset):
         self.input_dim = 42 * embedding_dim
         self.target_col = 41
         self.target_type = 'categorical'
-        self.p = p
         self.name = 'income_dataset'
         if cv !=None:
             self._cv_split(cv)
@@ -151,7 +150,7 @@ class income_dataset(base_dataset):
 
 
 class poker_dataset(base_dataset):
-    def __init__(self,embedding_dim = 64,p = probs(0.15,0.15),cv = None):
+    def __init__(self,embedding_dim = 64,cv = None):
         path = '/data/shared-data/UCI-income/poker_hand/poker-hand-testing.data'
         poker_1 = pd.read_csv(path,header=None)
         path = '/data/shared-data/UCI-income/poker_hand/poker-hand-training-true.data'
@@ -165,14 +164,13 @@ class poker_dataset(base_dataset):
         self.input_dim = 11 * embedding_dim
         self.target_col = 10
         self.target_type = 'categorical'
-        self.p = p
         self.name = 'poker_dataset'
         if cv != None:
             self._cv_split(cv)
 
 
 class boson_housing_dataset(base_dataset):
-    def __init__(self,embedding_dim = 64,p = probs(0.15,0.15),cv=None):
+    def __init__(self,embedding_dim = 64,cv=None):
         features,labels = load_boston(return_X_y=True)
         data = np.hstack((features, labels.reshape((-1, 1))))
         df = pd.DataFrame(data)
@@ -184,13 +182,12 @@ class boson_housing_dataset(base_dataset):
         self.input_dim = 14 * embedding_dim
         self.target_col = 13
         self.target_type = 'continuous'
-        self.p = p
         self.name= 'boston_housing_dataset'
         if cv != None:
             self._cv_split(cv)
 
 class forest_cover_dataset(base_dataset):
-    def __init__(self,embedding_dim = 64,p = probs(0.15,0.15),cv = None):
+    def __init__(self,embedding_dim = 64,cv = None):
         path = '/data/shared-data/UCI-income/forest_cover/covtype.data.gz'
         df = pd.read_csv(path, compression='gzip', header=None)
         self.split = {'train': 0.7, 'val': 0.1, 'test': 0.2}
@@ -199,13 +196,12 @@ class forest_cover_dataset(base_dataset):
         self.input_dim = 55 * embedding_dim
         self.target_col = 54
         self.target_type = 'categorical'
-        self.p = p
         self.name = 'forest_cover_dataset'
         if cv != None:
             self._cv_split(cv)
 
 class higgs_boston_dataset(base_dataset):
-    def __init__(self,embedding_dim = 64,p = probs(0.15,0.15),cv =None):
+    def __init__(self,embedding_dim = 64,cv =None):
         path = '/data/shared-data/UCI-income/boston_higgs/HIGGS.csv.gz'
         df = pd.read_csv(path,compression='gzip',header=None)
         temp = df.pop(0)
@@ -218,13 +214,12 @@ class higgs_boston_dataset(base_dataset):
         self.input_dim = 29 * embedding_dim
         self.target_col = 28
         self.target_type = 'categorical'
-        self.p = p
         self.name = 'higgs_boston_dataset'
         if cv != None:
             self._cv_split(cv)
 
 class kick_dataset(base_dataset):
-    def __init__(self,embedding_dim = 64,p = probs(0.15,0.15),cv = None):
+    def __init__(self,embedding_dim = 64,cv = None):
         path = '/data/shared-data/UCI-income/kick/kick.csv'
         df = pd.read_csv(path,header=None,skiprows=1)
         temp = df.pop(0)
@@ -238,13 +233,12 @@ class kick_dataset(base_dataset):
         self.input_dim = 33 * embedding_dim
         self.target_col = 32
         self.target_type = 'categorical'
-        self.p = p
         self.name = 'kick_dataset'
         if cv != None:
             self._cv_split(cv)
 
 class breast_cancer_dataset(base_dataset):
-    def __init__(self,embedding_dim = 64,p = probs(0.15,0.15),cv = None):
+    def __init__(self,embedding_dim = 64,cv = None):
         features,labels = load_breast_cancer(return_X_y=True)
         data = np.hstack((features,labels.reshape(-1,1)))
         df = pd.DataFrame(data)
@@ -256,13 +250,12 @@ class breast_cancer_dataset(base_dataset):
         self.input_dim = 31 * embedding_dim
         self.target_col = 30
         self.target_type = 'categorical'
-        self.p = p
         self.name = 'breast_cancer_dataset'
         if cv != None:
             self._cv_split(cv)
 
 class protein_dataset(base_dataset):
-    def __init__(self,embedding_dim = 64, p = probs(0.15,0.15),cv = None):
+    def __init__(self,embedding_dim = 64,cv = None):
         path = '/data/shared-data/UCI-income/protein/protein.csv'
         df = pd.read_csv(path)
         temp = df.pop('RMSD')
@@ -273,13 +266,12 @@ class protein_dataset(base_dataset):
         self.input_dim = 10 * embedding_dim
         self.target_col = 9
         self.target_type = 'continuous'
-        self.p = p
         self.name = 'protein_dataset'
         if cv != None:
             self._cv_split(cv)
 
 class concrete_dataset(base_dataset):
-    def __init__(self,embedding_dim = 64, p = probs(0.15,0.15),cv = None):
+    def __init__(self,embedding_dim = 64,cv = None):
         path = '/data/shared-data/UCI-income/concrete/concrete_data.csv'
         df = pd.read_csv(path)
         self.split = {'train': 0.7, 'val': 0.1, 'test': 0.2}
@@ -288,13 +280,12 @@ class concrete_dataset(base_dataset):
         self.input_dim = 9 * embedding_dim
         self.target_col = 8
         self.target_type = 'continuous'
-        self.p = p
         self.name = 'concrete_dataset'
         if cv != None:
             self._cv_split(cv)
 
 class yacht_dataset(base_dataset):
-    def __init__(self,embedding_dim = 64, p = probs(0.15,0.15),cv = None):
+    def __init__(self,embedding_dim = 64,cv = None):
         path = '/data/shared-data/UCI-income/yacht/yacht_hydrodynamics.data'
         df = pd.read_fwf(path,header = None)
         categorical_cols = np.arange(5)
@@ -305,7 +296,6 @@ class yacht_dataset(base_dataset):
         self.input_dim = 7 * embedding_dim
         self.target_col = 6
         self.target_type = 'continuous'
-        self.p = p
         self.name = 'yacht_dataset'
         if cv != None:
             self._cv_split(cv)
