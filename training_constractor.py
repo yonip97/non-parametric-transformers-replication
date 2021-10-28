@@ -15,11 +15,14 @@ from lamb import Lamb
 from preprocessing import Preprocessing
 from run_documentation import run_logger
 from util import probs
+from evaluation_metrics import *
+
+evaluation_metrics_dict = {'acc':acc, 'nll':nll, 'rmse':rmse, 'mse':mse}
 class Trainer():
-    def __init__(self, params_dict, eval_metric,data, device,
+    def __init__(self, params_dict,data, device,
                  lr_scheduler='flat_then_anneal', tradeoff_scheduler='cosine'):
         self.params = params_dict
-        self.eval_metric = eval_metric
+        self.eval_metric = evaluation_metrics_dict[params_dict['evaluation_metric']]()
         self.eval_steps = params_dict['eval_every_n_th_epoch']
         self.clip = params_dict['clip']
         self.cv = params_dict['cv']

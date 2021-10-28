@@ -2,26 +2,36 @@ import torch
 
 from build_datasets import *
 from util import probs
-from evaluation_metrics import *
 from training_constractor import Trainer
+import argparse
+
+datasets_dict = {'breast_cancer':breast_cancer_dataset, 'concrete':concrete_dataset, 'yacht':yacht_dataset, 'boston_housing':boson_housing_dataset}
 
 
-def main():
-    for seed in np.random.randint(0,100,size=4).tolist():
+def main(args):
+    if args.amount_of_seeds == -1:
+        if args.seeds is not None:
+            seeds = [int(item) for item in args.seeds.split(',')]
+        else:
+            seeds = []
+    else:
+        seeds = np.random.randint(0,100,args.amount_of_seeds).tolist()
+    for seed in seeds:
+        print(seed)
         torch_seed = seed
         numpy_seed = seed
         torch.manual_seed(torch_seed)
         np.random.seed(numpy_seed)
-        dataset = 'breast_cancer'
+        dataset = args.dataset
         label_mask_prob = 1
         features_mask_prob = 0.15
         cv = 10
-        data = breast_cancer_dataset(embedding_dim=32,cv= cv)
-        device = 'cpu'
-        if torch.cuda.is_available():
-            device = 'cuda'
-        max_steps = 2000
-        lr = 5e-4
+        embedding_dim = args.embedding_dim
+        data = datasets_dict[dataset](embedding_dim = embedding_dim, cv = cv)
+        device = args.device
+
+        max_steps = args.max_steps
+        lr = args.lr
         betas = (0.9,0.99)
         eps = 1e-6
         flat = 0.5
@@ -36,14 +46,15 @@ def main():
         clip = 1
         eval_every_n_th_epoch = 1
         improvements_necessary = 1
+        evaluation_metric = args.evaluation_metric
         params_dict = {'max_steps':max_steps,'lr':lr,'betas':betas,'eps':eps
                         ,'flat':flat,'k':k,'alpha':alpha,'model_layers':model_layers,'rff':rff_layers,
                        'heads':model_heads,'drop':drop_out,'batch_size':batch_size,'init_tradeoff':init_tradeoff,
                        'clip':clip,'eval_every_n_th_epoch':eval_every_n_th_epoch,'dataset':dataset,
-                       'label_mask_prob':label_mask_prob,'features_mask_prob':features_mask_prob,'cv':cv,
-                       'torch_seed':torch_seed,'numpy_seed':numpy_seed,'evaluation_metric':'nll',
+                       'label_mask_prob':label_mask_prob,'features_mask_prob':features_mask_prob,'embedding_dim':embedding_dim,
+                       'cv':cv,'torch_seed':torch_seed,'numpy_seed':numpy_seed,'evaluation_metric':evaluation_metric,
                        'improvements_necessary':improvements_necessary}
-        trainer = Trainer(params_dict=params_dict,eval_metric=nll(),data=data,device=device)
+        trainer = Trainer(params_dict=params_dict,data=data,device=device)
         trainer.run(data,batch_size,cv)
 
 
@@ -105,7 +116,20 @@ def main():
     #     print(score)
     #
 
+def build_parser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dataset',type=str,default='breast_cancer')
+    parser.add_argument('--amount_of_seeds',type=int,default=1)
+    parser.add_argument('--seeds',type = str, default=None)
+    parser.add_argument('--lr',type=float,default=1e-3)
+    parser.add_argument('--max_steps',type = int,default=2000)
+    parser.add_argument('--embedding_dim',type=int, default=128)
+    parser.add_argument('--evaluation_metric',type=str,default='nll')
+    parser.add_argument('--device',type=str,default='cpu')
+    return parser
 
 
 if __name__ == '__main__':
-    main()
+    parser = build_parser()
+    args = parser.parse_args()
+    main(args)

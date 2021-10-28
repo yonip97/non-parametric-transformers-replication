@@ -15,6 +15,7 @@ from sklearn.preprocessing import OneHotEncoder
 
 class base_dataset():
     def _cutoff(self,df, cont_features):
+        df= df.dropna()
         new_cols = {col: new_col for col, new_col in zip(df.columns, range(len(df.columns) + 1))}
         df = df.rename(columns=new_cols)
         #df = df.replace({np.nan: None})
@@ -35,6 +36,7 @@ class base_dataset():
         self._create_sets(df.to_numpy(dtype=np.float))
 
     def _manual_preprocessing(self, df,categorical_cols,continuous_cols):
+        df = df.dropna()
         new_cols = {col: new_col for col, new_col in zip(df.columns, range(len(df.columns) + 1))}
         df = df.rename(columns=new_cols)
         #df = df.replace({np.nan: None})

@@ -48,6 +48,7 @@ class Preprocessing():
 
     def _save_original_data_tensors(self):
         data = np.copy(self.data.train_data)
+        #TODO: check how to deal with nan
         data = data[~np.any(data == -1, axis=1)]
         for col in self.data.continuous:
             data[:,col] = (data[:,col]-self.stats[col]['mean'])/self.stats[col]['std']
