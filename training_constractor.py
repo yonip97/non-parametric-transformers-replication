@@ -2,10 +2,11 @@ from npt import NPT
 from loss import Loss
 import torch
 from lamb import Lamb
+from torch import autograd
 import time
 import torch.utils.data as utils_data
 import numpy as np
-#from evaluation_metrics import *
+# from evaluation_metrics import *
 from util import permute
 import math
 from npt import NPT
@@ -17,25 +18,32 @@ from run_documentation import run_logger
 from util import probs
 from evaluation_metrics import *
 
-evaluation_metrics_dict = {'acc':acc, 'nll':nll, 'rmse':rmse, 'mse':mse}
+MAX_BATCH_SIZE = 1024
+evaluation_metrics_dict = {'acc': acc, 'nll': nll, 'rmse': rmse, 'mse': mse}
+
+
 class Trainer():
-    def __init__(self, params_dict,data, device,
+    def __init__(self, params_dict, data, device,
                  lr_scheduler='flat_then_anneal', tradeoff_scheduler='cosine'):
         self.params = params_dict
         self.eval_metric = evaluation_metrics_dict[params_dict['evaluation_metric']]()
         self.eval_steps = params_dict['eval_every_n_th_epoch']
+        self.print_steps = params_dict['print_every_n_th_epoch']
         self.clip = params_dict['clip']
         self.cv = params_dict['cv']
-        self.p = probs(params_dict['features_mask_prob'],params_dict['label_mask_prob'])
+        self.p = probs(params_dict['features_mask_prob'], params_dict['label_mask_prob'])
         self.lr_scheduler = lr_scheduler
         self.tradeoff_scheduler = tradeoff_scheduler
         self.device = device
         self.run_logger = run_logger(data)
-        self.cacher_improvements_necessary =params_dict['improvements_necessary']
+        self.cacher_improvements_necessary = params_dict['improvements_necessary']
         self.run_logger.record_hyperparameters(params_dict)
+        self.step_each_n_batches = 1
+        self.batches_per_epoch = 0
 
-    def build_npt(self,encoded_data):
-        self.model = NPT(encoded_data,self.params['model_layers'], self.params['heads'], self.params['rff'], self.device,
+    def build_npt(self, encoded_data):
+        self.model = NPT(encoded_data, self.params['model_layers'], self.params['heads'], self.params['rff'],
+                         self.device,
                          self.params['drop'])
         if self.clip is not None:
             for p in self.model.parameters():
@@ -47,62 +55,71 @@ class Trainer():
 
     def build_optimizer(self):
         lamb_optimizer = Lamb(self.model.parameters(), self.params['lr'], self.params['betas'], self.params['eps'])
-        lookahead_optimizer = Lookahead(lamb_optimizer, self.params['max_steps'], self.params['flat'], self.params['k'],
-                                        self.params['alpha'])
+        lookahead_optimizer = Lookahead(lamb_optimizer, self.params['max_steps'],
+                                        self.params['flat'], self.params['k'],self.params['alpha'])
         self.optimizer = lookahead_optimizer
 
-    def get_epochs(self, data, max_steps, batch_size):
+    def get_epochs_and_run_batch_size(self, data, max_steps, batch_size):
         if batch_size == -1:
-            return max_steps, len(data.train_data)
+            if len(data.train_data) <= MAX_BATCH_SIZE:
+                return max_steps, len(data.train_data)
+            else:
+                self.step_each_n_batches = math.ceil(len(data.train_data) / MAX_BATCH_SIZE)
+                return max_steps, MAX_BATCH_SIZE
         else:
-            steps_per_epoch = math.ceil(len(data.train_data) / batch_size)
-            epochs = math.ceil(max_steps / steps_per_epoch)
-            return epochs, batch_size
+            if batch_size <= MAX_BATCH_SIZE:
+                steps_per_epoch = math.ceil(len(data.train_data) / batch_size)
+                epochs = math.ceil(max_steps / steps_per_epoch)
+                return epochs, batch_size
+            else:
+                steps_per_epoch = math.ceil(len(data.train_data) / MAX_BATCH_SIZE)
+                epochs = math.ceil(max_steps / steps_per_epoch)
+                self.step_each_n_batches = math.ceil(batch_size / MAX_BATCH_SIZE)
+                return epochs, MAX_BATCH_SIZE
 
-    def run(self,data,batch_size,cv = None,test = None):
+    def run(self, data, batch_size, cv=None, test=None):
         if test == None:
-            self.run_training(data,batch_size,cv)
+            self.run_training(data, batch_size, cv)
         elif test == 'duplicate':
-            self.run_duplicate(data,batch_size, cv)
+            self.run_duplicate(data, batch_size, cv)
         elif test == 'corruption':
-            self.run_corroption(data,batch_size,cv)
+            self.run_corroption(data, batch_size, cv)
         elif test == 'deletion':
-            self.run_deletion(data,batch_size,cv)
+            self.run_deletion(data, batch_size, cv)
 
     def run_training(self, data, batch_size, cv=None):
         # self.run_logger = run_logger(data)
         if cv == None:
             self.run_logger.define_cacher(improvements_necessary=self.cacher_improvements_necessary)
-            #self.model_cacher = Model_Cacher(data,cv)
-            epochs, run_batch_size = self.get_epochs(data, self.params['max_steps'], batch_size)
+            # self.model_cacher = Model_Cacher(data,cv)
+            epochs, run_batch_size = self.get_epochs_and_run_batch_size(data, self.params['max_steps'], batch_size)
             encoded_data = Preprocessing(data, self.p)
             self.build_npt(encoded_data)
             self.build_optimizer()
             self.build_loss_function(encoded_data)
-            self.train(encoded_data,epochs,run_batch_size)
+            self.train(encoded_data, epochs, run_batch_size)
             test_results = self.test(encoded_data)
             print(f"The evaluation metric loss on the test set is {test_results:.4f}")
             test_results = np.array(test_results)
         else:
             test_results = []
-            for i in range(1,cv+1):
+            for i in range(1, cv + 1):
                 print(f"Cross validation at split {i}/{cv}")
                 data.next()
-                epochs, run_batch_size = self.get_epochs(data, self.params['max_steps'], batch_size)
+                epochs, run_batch_size = self.get_epochs_and_run_batch_size(data, self.params['max_steps'], batch_size)
                 encoded_data = Preprocessing(data, self.p)
-                self.run_logger.define_cacher(cv=i,improvements_necessary=self.cacher_improvements_necessary)
-                #self.model_cacher = Model_Cacher(data, i)
+                self.run_logger.define_cacher(cv=i, improvements_necessary=self.cacher_improvements_necessary)
                 self.build_npt(encoded_data)
                 self.build_optimizer()
                 self.build_loss_function(encoded_data)
-                self.train(encoded_data,epochs,run_batch_size)
+                self.train(encoded_data, epochs, run_batch_size)
                 test_eval = self.test(encoded_data)
                 print(f"The evaluation metric loss on the test set is {test_eval:.4f}")
                 test_results.append(test_eval)
             test_results = np.array(test_results)
         self.calculate_and_save_results(test_results)
 
-    def calculate_and_save_results(self,results):
+    def calculate_and_save_results(self, results):
         printable_results = f'''
         Run results are:
         The mean of the results is {results.mean():.4f}
@@ -110,57 +127,71 @@ class Trainer():
         '''
         print(printable_results)
         self.run_logger.save_run_results(printable_results)
-    def train(self, encoded_data,epochs, batch_size):
-        X_train,M_train,orig_train_data = encoded_data.get('train')
-        X_val,M_val,orig_val_data = encoded_data.get('val')
-        train = utils_data.TensorDataset(X_train.to(self.device), M_train.to(self.device),orig_train_data.to(self.device))
+
+    def train(self, encoded_data, epochs, batch_size):
+        X_train, M_train, orig_train_data = encoded_data.get('train')
+        X_val, M_val, orig_val_data = encoded_data.get('val')
+        train = utils_data.TensorDataset(X_train.to(self.device), M_train.to(self.device),
+                                         orig_train_data.to(self.device))
         train_loader = utils_data.DataLoader(train, batch_size=batch_size, shuffle=True)
         start = time.time()
         for epoch in range(1, epochs + 1):
             for batch_data in train_loader:
+                self.batches_per_epoch += 1
                 batch_X, batch_M, batch_real_data = batch_data
                 batch_loss = self.pass_through(batch_X, batch_M, batch_real_data)
             if epoch % self.eval_steps == 0:
                 self.model.eval()
-                eval_loss = self.pass_through(X_val.to(self.device), M_val.to(self.device), orig_val_data.to(self.device))
-                self.run_logger.check_improvement(self.model,eval_loss,epoch)
+                eval_loss = self.pass_through(X_val.to(self.device), M_val.to(self.device),
+                                              orig_val_data.to(self.device))
+                self.run_logger.check_improvement(self.model, eval_loss, epoch)
+                if epoch % self.print_steps:
+                    print(f"Time for {self.eval_steps} epochs is {time.time() - start:.3f} seconds")
+                    print(f"Current lr is {self.optimizer.param_groups[0]['lr']:.6f}")
+                    print(f"The validation loss is {eval_loss:.3f} after {epoch} epochs")
+                    print(f"Model loss was {batch_loss:.3f} after {epoch} epochs")
+                    start = time.time()
                 self.model.train()
-                print(f"Time for {self.eval_steps} epochs is {time.time()-start:.3f} seconds")
-                print(f"Current lr is {self.optimizer.param_groups[0]['lr']:.6f}")
-                start = time.time()
-                print(f"The validation loss is {eval_loss:.3f} after {epoch} epochs")
-                #print(f"The  metric loss on the validation set is {eval_loss} after {epoch} epochs")
-                print(f"Model loss was {batch_loss:.3f} after {epoch} epochs")
+            self.step()
+            self.batches_per_epoch = 0
 
     def pass_through(self, batch_X, batch_M, batch_real_data):
-        z = self.model.forward(batch_X, batch_M)
         if self.model.training:
-            batch_loss = self.step(z, batch_M, batch_real_data)
+            z = self.model.forward(batch_X, batch_M)
+            batch_loss = self.loss_function.compute(z, batch_real_data, batch_M)
+            batch_loss.backward()
+            if self.batches_per_epoch % self.step_each_n_batches == 0:
+                self.step()
         else:
-            batch_loss = self.eval_model(z, batch_M, batch_real_data)
+            with torch.no_grad():
+                z = self.model.forward(batch_X, batch_M)
+                batch_loss = self.loss_function.val_loss(z, batch_real_data, batch_M)
         return batch_loss.item()
 
-    def step(self, z, batch_M, batch_real_data):
-        batch_loss = self.loss_function.compute(z, batch_real_data, batch_M)
-        batch_loss.backward()
+    def step(self):
         self.optimizer.step()
-        if self.lr_scheduler == 'flat_then_anneal':
-            self.optimizer.flat_then_anneal()
-        if self.tradeoff_scheduler == 'cosine':
-            self.loss_function.Scheduler_cosine_step()
+        self.lr_scheduler_step()
+        self.tradeoff_scheduler_step()
         self.optimizer.zero_grad()
-        return batch_loss
 
-    def eval_model(self,z, batch_M, batch_real_data):
-        return self.loss_function.val_loss(z,batch_real_data,batch_M)
+    def lr_scheduler_step(self):
+        if self.lr_scheduler == 'constant':
+            return
+        elif self.lr_scheduler == 'flat_then_anneal':
+            self.optimizer.flat_then_anneal()
 
+    def tradeoff_scheduler_step(self):
+        if self.tradeoff_scheduler == 'constant':
+            return
+        elif self.tradeoff_scheduler == 'cosine':
+            self.loss_function.Scheduler_cosine_step()
 
     def evaluate(self, data, eval_X, eval_M, true_labels):
         self.model.eval()
         with torch.no_grad():
             z = self.model.forward(eval_X.to(self.device), eval_M.to(self.device))
             pred = z[data.target_col].detach().cpu()
-            if data.target_type =='continuous':
+            if data.target_type == 'continuous':
                 pred *= data.stats[data.target_col]['std']
                 pred += data.stats[data.target_col]['mean']
                 true_labels *= data.stats[data.target_col]['std']
@@ -169,14 +200,24 @@ class Trainer():
         self.model.train()
         return eval_loss
 
-    def test(self,data):
+    def test(self, data):
         self.run_logger.load_model(self.model)
-        X_test, M_test,orig_test_tensors = data.get('test')
-        test_eval = self.evaluate(data, X_test, M_test, orig_test_tensors[:,-1])
-        return test_eval
+        X_test, M_test, orig_test_tensors = data.get('test')
+        true_labels = orig_test_tensors[:,-1]
+        self.model.eval()
+        with torch.no_grad():
+            z = self.model.forward(X_test.to(self.device), M_test.to(self.device))
+            pred = z[data.target_col].detach().cpu()
+            if data.target_type == 'continuous':
+                pred *= data.stats[data.target_col]['std']
+                pred += data.stats[data.target_col]['mean']
+                true_labels *= data.stats[data.target_col]['std']
+                true_labels += data.stats[data.target_col]['mean']
+            test_metric_loss = self.eval_metric.compute(pred, true_labels, M_test[:, -1])
+        self.model.train()
+        return test_metric_loss
 
-
-    def run_duplicate(self,data,batch_size,cv = None):
+    def run_duplicate(self, data, batch_size, cv=None):
         if cv == None:
             self.build_npt(data)
             self.build_optimizer()
@@ -202,7 +243,9 @@ class Trainer():
                 X_test, M_test = data.mask_targets('test')
                 true_labels = np.concatenate((data.train_data[:, -1], data.val_data[:, -1], data.test_data[:, -1]))
                 true_labels_modified = np.concatenate((true_labels, true_labels), 0)
-                X_test_modified = torch.cat((X_test, torch.Tensor(data.train_data).float(), torch.tensor(data.val_data).float(), torch.tensor(data.test_data).float()),0)
+                X_test_modified = torch.cat((X_test, torch.Tensor(data.train_data).float(),
+                                             torch.tensor(data.val_data).float(), torch.tensor(data.test_data).float()),
+                                            0)
                 M_test_modified = torch.cat((M_test, torch.zeros(M_test.shape)), 0)
                 test_eval = self.evaluate(data, X_test_modified, M_test_modified, true_labels_modified)
                 print(f"The evaluation metric loss on the test set is {test_eval}")
@@ -210,7 +253,7 @@ class Trainer():
             return np.array(test_evals)
 
     def data_duplicate(self, data, batch_size):
-        epochs, batch_size = self.get_epochs(data, self.params['max_steps'], batch_size)
+        epochs, batch_size = self.get_epochs_and_run_batch_size(data, self.params['max_steps'], batch_size)
         for epoch in range(1, epochs + 1):
             train_data, val_data, test_data = data.normalize()
             X, M = data.create_training_mask(train_data)
@@ -227,15 +270,16 @@ class Trainer():
             if epoch % self.eval_steps == 0:
                 true_labels = np.concatenate((data.train_data[:, -1], data.val_data[:, -1]))
                 eval_X, eval_M = data.mask_targets('val')
-                eval_X_modified = torch.cat((eval_X, torch.tensor(data.train_data).float(), torch.tensor(data.val_data).float()), 0)
+                eval_X_modified = torch.cat(
+                    (eval_X, torch.tensor(data.train_data).float(), torch.tensor(data.val_data).float()), 0)
                 eval_M_modified = torch.cat((eval_M, torch.zeros(eval_M.shape)), 0)
                 true_labels_modified = np.concatenate((true_labels, true_labels), 0)
                 eval_loss = self.evaluate(data, eval_X_modified, eval_M_modified, true_labels_modified)
                 print(f"model loss was {batch_loss} after {epoch} epochs")
                 print(f"The evaluation metric loss on the validation set is {eval_loss} after {epoch} epochs")
 
-    def data_corruption(self,data,batch_size,cv = None):
-        self.run_training(data,batch_size,cv)
+    def data_corruption(self, data, batch_size, cv=None):
+        self.run_training(data, batch_size, cv)
         full_set = np.concatenate((data.train_data, data.val_data, data.test_data), axis=0)
         full_data = utils_data.TensorDataset(torch.tensor(full_set, requires_grad=False, dtype=torch.float))
         data_loader = utils_data.DataLoader(full_data, batch_size=batch_size, shuffle=True)
@@ -243,11 +287,11 @@ class Trainer():
             batch_data = batch_data[0]
             for i in range(len(batch_data)):
                 permuted_X, M, real_label = permute(batch_data, i)
-                score = self.evaluate(data,permuted_X,M,real_label)
+                score = self.evaluate(data, permuted_X, M, real_label)
                 print(f"the evaluation metric loss of the sample is {score}")
 
-    def data_deletion(self,data,batch_size,cv = None):
-        self.run_training(data,batch_size,cv)
+    def data_deletion(self, data, batch_size, cv=None):
+        self.run_training(data, batch_size, cv)
         self.model.eval()
         full_set = np.concatenate((data.train_data, data.val_data, data.test_data), axis=0)
         full_data = torch.tensor(full_set, dtype=torch.float)
@@ -287,25 +331,6 @@ class Trainer():
                     break
             result_dict[i] = R
         return result_dict
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 # def data_corruption(data, model, epochs, optimizer, batch_size, loss_function, eval_metric, eval_each_n_epochs,
 #                     switch_to_pred=False, clip=None, use_lr_scheduler=False, use_tradeoff_scheduler=False):

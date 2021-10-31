@@ -7,8 +7,10 @@ import warnings
 from torch.optim.optimizer import Optimizer
 from torch.nn.utils import clip_grad_norm_
 
+
+
 class Lookahead(Optimizer):
-    def __init__(self, optimizer,max_steps,flat_proportion, k=6, alpha=0.5):
+    def __init__(self, optimizer,max_steps,flat_proportion = None, k=6, alpha=0.5):
         self.optimizer = optimizer
         self.k = k
         self.alpha = alpha
@@ -88,3 +90,4 @@ class Lookahead(Optimizer):
         elif self.steps_taken > self.max_steps:
             for group in self.param_groups:
                 group['lr'] = 0
+

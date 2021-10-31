@@ -29,9 +29,10 @@ class run_logger():
 
 
     def define_cacher(self,cv = None,improvements_necessary = 1):
+        path = self.run_path
         if cv is not None:
-            path = os.path.join(self.run_path, str(cv))
-        os.mkdir(path)
+            path = os.path.join(path, str(cv))
+            os.mkdir(path)
         self.model_cacher = Model_Cacher(path,improvements_necessary)
 
 
