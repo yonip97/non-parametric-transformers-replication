@@ -5,8 +5,11 @@ import json
 
 
 class run_logger():
-    def __init__(self,dataset):
-        parent_path = '/home/yehonatan-pe/replication/model_runs_information/'
+    def __init__(self,dataset,experiment):
+        if experiment is None:
+            parent_path = '/home/yehonatan-pe/replication/runs/regular_runs_information'
+        else:
+            parent_path = f'/home/yehonatan-pe/replication/runs/{experiment}_runs_information'
         if not os.path.exists(parent_path):
             os.mkdir(parent_path)
         dataset_name = dataset.name
@@ -28,7 +31,9 @@ class run_logger():
             file.close()
 
 
-    def define_cacher(self,cv = None,improvements_necessary = 1):
+    def define_cacher(self,cv = None,improvements_necessary = 1,is_duplicate = False):
+        if is_duplicate:
+            self.run_path
         path = self.run_path
         if cv is not None:
             path = os.path.join(path, str(cv))
@@ -43,8 +48,13 @@ class run_logger():
     def load_model(self, model):
         self.model_cacher.load_model(model)
 
-    def save_run_results(self,results):
-        path = os.path.join(self.run_path,'results.txt')
-        with open(path,'w') as file:
+    def create_results_file(self):
+        self.result_path = os.path.join(self.run_path, 'results.txt')
+        with open(self.result_path,'w') as file:
+            file.write('The results are:\n')
+            file.close()
+
+    def save_run_metric_results(self,results):
+        with open(self.result_path,'a') as file:
             file.write(results)
             file.close()

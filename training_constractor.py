@@ -23,10 +23,10 @@ evaluation_metrics_dict = {'acc': acc, 'nll': nll, 'rmse': rmse, 'mse': mse}
 
 
 class Trainer():
-    def __init__(self, params_dict, data, device,
+    def __init__(self, params_dict, data, device,experiment = None,
                  lr_scheduler='flat_then_anneal', tradeoff_scheduler='cosine'):
         self.params = params_dict
-        self.eval_metric = evaluation_metrics_dict[params_dict['evaluation_metric']]()
+        self.eval_metrics = {eval_metric:evaluation_metrics_dict[eval_metric]() for eval_metric in params_dict['evaluation_metrics']}
         self.eval_steps = params_dict['eval_every_n_th_epoch']
         self.print_steps = params_dict['print_every_n_th_epoch']
         self.clip = params_dict['clip']
@@ -35,7 +35,7 @@ class Trainer():
         self.lr_scheduler = lr_scheduler
         self.tradeoff_scheduler = tradeoff_scheduler
         self.device = device
-        self.run_logger = run_logger(data)
+        self.run_logger = run_logger(data,experiment)
         self.cacher_improvements_necessary = params_dict['improvements_necessary']
         self.run_logger.record_hyperparameters(params_dict)
         self.step_each_n_batches = 1
@@ -78,55 +78,65 @@ class Trainer():
                 return epochs, MAX_BATCH_SIZE
 
     def run(self, data, batch_size, cv=None, test=None):
-        if test == None:
+        if test is None:
             self.run_training(data, batch_size, cv)
-        elif test == 'duplicate':
-            self.run_duplicate(data, batch_size, cv)
+        if test == 'duplicate':
+            self.run_training(data,batch_size,cv,True)
         elif test == 'corruption':
             self.run_corroption(data, batch_size, cv)
         elif test == 'deletion':
             self.run_deletion(data, batch_size, cv)
 
-    def run_training(self, data, batch_size, cv=None):
-        # self.run_logger = run_logger(data)
+    def run_training(self, data, batch_size, cv=None,duplicate = False):
+        results = {}
         if cv == None:
             self.run_logger.define_cacher(improvements_necessary=self.cacher_improvements_necessary)
-            # self.model_cacher = Model_Cacher(data,cv)
             epochs, run_batch_size = self.get_epochs_and_run_batch_size(data, self.params['max_steps'], batch_size)
             encoded_data = Preprocessing(data, self.p)
             self.build_npt(encoded_data)
             self.build_optimizer()
             self.build_loss_function(encoded_data)
-            self.train(encoded_data, epochs, run_batch_size)
-            test_results = self.test(encoded_data)
-            print(f"The evaluation metric loss on the test set is {test_results:.4f}")
-            test_results = np.array(test_results)
+            if duplicate:
+                self.duplicate_experiment(encoded_data, epochs, run_batch_size)
+            else:
+                self.train(encoded_data, epochs, run_batch_size)
+            run_results = self.test(encoded_data)
+            for metric,score in run_results.items():
+                print(f"The {metric} loss on the test set is {score:.4f}")
+                results[metric] = np.array(score)
         else:
-            test_results = []
             for i in range(1, cv + 1):
                 print(f"Cross validation at split {i}/{cv}")
                 data.next()
+                self.run_logger.define_cacher(cv=i, improvements_necessary=self.cacher_improvements_necessary)
                 epochs, run_batch_size = self.get_epochs_and_run_batch_size(data, self.params['max_steps'], batch_size)
                 encoded_data = Preprocessing(data, self.p)
-                self.run_logger.define_cacher(cv=i, improvements_necessary=self.cacher_improvements_necessary)
                 self.build_npt(encoded_data)
                 self.build_optimizer()
                 self.build_loss_function(encoded_data)
-                self.train(encoded_data, epochs, run_batch_size)
-                test_eval = self.test(encoded_data)
-                print(f"The evaluation metric loss on the test set is {test_eval:.4f}")
-                test_results.append(test_eval)
-            test_results = np.array(test_results)
-        self.calculate_and_save_results(test_results)
+                if duplicate:
+                    self.duplicate_experiment(encoded_data, epochs, run_batch_size)
+                else:
+                    self.train(encoded_data, epochs, run_batch_size)
+                run_result = self.test(encoded_data)
+                for metric,score in run_result.items():
+                    print(f"The {metric} loss on the test set is {score:.4f}")
+                    if metric not in results.keys():
+                        results[metric] = np.array(score)
+                    else:
+                        results[metric] = np.append(results[metric],score)
+        self.calculate_and_save_results(results)
 
     def calculate_and_save_results(self, results):
-        printable_results = f'''
-        Run results are:
-        The mean of the results is {results.mean():.4f}
-        The std of the results is {results.std():.4f}
-        '''
-        print(printable_results)
-        self.run_logger.save_run_results(printable_results)
+        self.run_logger.create_results_file()
+        for metric,scores in results.items():
+            printable_results = f'''
+            Run results for {metric} loss are:
+            The mean of the results is {scores.mean():.4f}
+            The std of the results is {scores.std():.4f}
+            '''
+            print(printable_results)
+            self.run_logger.save_run_metric_results(printable_results)
 
     def train(self, encoded_data, epochs, batch_size):
         X_train, M_train, orig_train_data = encoded_data.get('train')
@@ -186,21 +196,25 @@ class Trainer():
         elif self.tradeoff_scheduler == 'cosine':
             self.loss_function.Scheduler_cosine_step()
 
-    def evaluate(self, data, eval_X, eval_M, true_labels):
-        self.model.eval()
-        with torch.no_grad():
-            z = self.model.forward(eval_X.to(self.device), eval_M.to(self.device))
-            pred = z[data.target_col].detach().cpu()
-            if data.target_type == 'continuous':
-                pred *= data.stats[data.target_col]['std']
-                pred += data.stats[data.target_col]['mean']
-                true_labels *= data.stats[data.target_col]['std']
-                true_labels += data.stats[data.target_col]['mean']
-            eval_loss = self.eval_metric.compute(pred, true_labels, eval_M[:, -1])
-        self.model.train()
-        return eval_loss
+    # def evaluate(self, data, eval_X, eval_M, true_labels):
+    #     evaluation_metrics_results = {}
+    #     self.model.eval()
+    #     with torch.no_grad():
+    #         z = self.model.forward(eval_X.to(self.device), eval_M.to(self.device))
+    #         pred = z[data.target_col].detach().cpu()
+    #         if data.target_type == 'continuous':
+    #             pred *= data.stats[data.target_col]['std']
+    #             pred += data.stats[data.target_col]['mean']
+    #             true_labels *= data.stats[data.target_col]['std']
+    #             true_labels += data.stats[data.target_col]['mean']
+    #         for eval_metric in self.eval_metric:
+    #             eval_loss = evaluation_metrics_dict[eval_metric].compute(pred, true_labels, eval_M[:, -1])
+    #             evaluation_metrics_results[eval_metric] = eval_loss
+    #     self.model.train()
+    #     return evaluation_metrics_results
 
     def test(self, data):
+        evaluation_metrics_results = {}
         self.run_logger.load_model(self.model)
         X_test, M_test, orig_test_tensors = data.get('test')
         true_labels = orig_test_tensors[:,-1]
@@ -213,70 +227,63 @@ class Trainer():
                 pred += data.stats[data.target_col]['mean']
                 true_labels *= data.stats[data.target_col]['std']
                 true_labels += data.stats[data.target_col]['mean']
-            test_metric_loss = self.eval_metric.compute(pred, true_labels, M_test[:, -1])
+            for eval_metric,eval_metric_instance in self.eval_metrics.items():
+                eval_loss = eval_metric_instance.compute(pred, true_labels, M_test[:, -1])
+                evaluation_metrics_results[eval_metric] = eval_loss
         self.model.train()
-        return test_metric_loss
+        return evaluation_metrics_results
 
-    def run_duplicate(self, data, batch_size, cv=None):
-        if cv == None:
-            self.build_npt(data)
-            self.build_optimizer()
-            self.build_loss_function(data)
-            self.data_duplicate(data, batch_size)
-            X_test, M_test = data.mask_targets('test')
-            true_labels = np.concatenate((data.train_data[:, -1], data.val_data[:, -1], data.test_data[:, -1]))
-            true_labels_modified = np.concatenate((true_labels, true_labels), 0)
-            X_test_modified = torch.cat(
-                (X_test, torch.Tensor(data.train_data), torch.tensor(data.val_data), torch.tensor(data.test_data)), 0)
-            M_test_modified = torch.cat((M_test, torch.zeros(M_test.shape)), 0)
-            test_eval = self.evaluate(data, X_test_modified, M_test_modified, true_labels_modified)
-            print(f"The evaluation metric loss on the test set is {test_eval}")
-            return test_eval
-        else:
-            test_evals = []
-            for i in range(cv):
-                data.next()
-                self.build_npt(data)
-                self.build_optimizer()
-                self.build_loss_function(data)
-                self.data_duplicate(data, batch_size)
-                X_test, M_test = data.mask_targets('test')
-                true_labels = np.concatenate((data.train_data[:, -1], data.val_data[:, -1], data.test_data[:, -1]))
-                true_labels_modified = np.concatenate((true_labels, true_labels), 0)
-                X_test_modified = torch.cat((X_test, torch.Tensor(data.train_data).float(),
-                                             torch.tensor(data.val_data).float(), torch.tensor(data.test_data).float()),
-                                            0)
-                M_test_modified = torch.cat((M_test, torch.zeros(M_test.shape)), 0)
-                test_eval = self.evaluate(data, X_test_modified, M_test_modified, true_labels_modified)
-                print(f"The evaluation metric loss on the test set is {test_eval}")
-                test_evals.append(test_eval)
-            return np.array(test_evals)
-
-    def data_duplicate(self, data, batch_size):
-        epochs, batch_size = self.get_epochs_and_run_batch_size(data, self.params['max_steps'], batch_size)
+    def duplicate_experiment(self, encoded_data, epochs, batch_size):
+        X_train, M_train, orig_train_data = encoded_data.get('train')
+        X_val, M_val, orig_val_data = encoded_data.get('val')
+        X_val_modified = torch.cat((X_val,orig_val_data),0)
+        M_val_modified = torch.cat((M_val,torch.zeros(M_val.shape)),0)
+        orig_val_data_modified = torch.cat((orig_val_data,orig_val_data),0)
+        train = utils_data.TensorDataset(X_train.to(self.device), M_train.to(self.device),
+                                         orig_train_data.to(self.device))
+        train_loader = utils_data.DataLoader(train, batch_size=batch_size, shuffle=True)
+        start = time.time()
         for epoch in range(1, epochs + 1):
-            train_data, val_data, test_data = data.normalize()
-            X, M = data.create_training_mask(train_data)
-            train = utils_data.TensorDataset(X.to(self.device), M.to(self.device),
-                                             torch.tensor(train_data, requires_grad=False, dtype=torch.float).to(
-                                                 self.device))
-            train_loader = utils_data.DataLoader(train, batch_size=batch_size, shuffle=True)
             for batch_data in train_loader:
+                self.batches_per_epoch += 1
                 batch_X, batch_M, batch_real_data = batch_data
                 batch_X_modified = torch.cat((batch_X, batch_real_data), 0)
-                batch_M_modified = torch.cat((batch_M, torch.zeros(batch_M.shape).to(self.device).float()), 0)
-                batch_real_data_modified = torch.cat((batch_real_data, batch_real_data), 0)
+                batch_M_modified = torch.cat((batch_M, torch.zeros(batch_M.shape).to(self.device)), 0)
+                batch_real_data_modified = torch.cat((batch_real_data,batch_real_data),0)
                 batch_loss = self.pass_through(batch_X_modified, batch_M_modified, batch_real_data_modified)
             if epoch % self.eval_steps == 0:
-                true_labels = np.concatenate((data.train_data[:, -1], data.val_data[:, -1]))
-                eval_X, eval_M = data.mask_targets('val')
-                eval_X_modified = torch.cat(
-                    (eval_X, torch.tensor(data.train_data).float(), torch.tensor(data.val_data).float()), 0)
-                eval_M_modified = torch.cat((eval_M, torch.zeros(eval_M.shape)), 0)
-                true_labels_modified = np.concatenate((true_labels, true_labels), 0)
-                eval_loss = self.evaluate(data, eval_X_modified, eval_M_modified, true_labels_modified)
-                print(f"model loss was {batch_loss} after {epoch} epochs")
-                print(f"The evaluation metric loss on the validation set is {eval_loss} after {epoch} epochs")
+                self.model.eval()
+                eval_loss = self.pass_through(X_val_modified.to(self.device), M_val_modified.to(self.device),
+                                              orig_val_data_modified.to(self.device))
+                self.run_logger.check_improvement(self.model, eval_loss, epoch)
+                if epoch % self.print_steps:
+                    print(f"Time for {self.eval_steps} epochs is {time.time() - start:.3f} seconds")
+                    print(f"Current lr is {self.optimizer.param_groups[0]['lr']:.6f}")
+                    print(f"The validation loss is {eval_loss:.3f} after {epoch} epochs")
+                    print(f"Model loss was {batch_loss:.3f} after {epoch} epochs")
+                    start = time.time()
+                self.model.train()
+            self.step()
+            self.batches_per_epoch = 0
+
+    def test_duplicate(self,data):
+        self.run_logger.load_model(self.model)
+        X_test, M_test, orig_test_tensors = data.get('test')
+        X_test_modified = torch.cat((X_test,orig_test_tensors),0)
+        M_test_modified = torch.cat((M_test,torch.zeros(M_test.shape())),0)
+        true_labels = torch.cat((orig_test_tensors[:, -1],orig_test_tensors[:, -1]),0)
+        self.model.eval()
+        with torch.no_grad():
+            z = self.model.forward(X_test_modified.to(self.device), M_test_modified.to(self.device))
+            pred = z[data.target_col].detach().cpu()
+            if data.target_type == 'continuous':
+                pred *= data.stats[data.target_col]['std']
+                pred += data.stats[data.target_col]['mean']
+                true_labels *= data.stats[data.target_col]['std']
+                true_labels += data.stats[data.target_col]['mean']
+            test_metric_loss = self.eval_metrics.compute(pred, true_labels, M_test[:, -1])
+        self.model.train()
+        return test_metric_loss
 
     def data_corruption(self, data, batch_size, cv=None):
         self.run_training(data, batch_size, cv)
@@ -287,8 +294,9 @@ class Trainer():
             batch_data = batch_data[0]
             for i in range(len(batch_data)):
                 permuted_X, M, real_label = permute(batch_data, i)
-                score = self.evaluate(data, permuted_X, M, real_label)
-                print(f"the evaluation metric loss of the sample is {score}")
+                scores = self.evaluate(data, permuted_X, M, real_label)
+                for metric,score in scores.items():
+                    print(f"The {metric} loss of the sample is {score}")
 
     def data_deletion(self, data, batch_size, cv=None):
         self.run_training(data, batch_size, cv)
@@ -502,3 +510,32 @@ class Trainer():
 #         score = eval_metric.compute(pred[:, -1].detch().cpu().numpy(), data.test_data[:, -1])
 #         print(score)
 #
+# def run_duplicate(self, data, batch_size, cv=None):
+    #     if cv == None:
+    #         self.run_logger.define_cacher(improvements_necessary=self.cacher_improvements_necessary)
+    #         epochs, run_batch_size = self.get_epochs_and_run_batch_size(data, self.params['max_steps'], batch_size)
+    #         encoded_data = Preprocessing(data, self.p)
+    #         self.build_npt(encoded_data)
+    #         self.build_optimizer()
+    #         self.build_loss_function(encoded_data)
+    #         self.train(encoded_data, epochs, run_batch_size)
+    #         test_results = self.test(encoded_data)
+    #         print(f"The evaluation metric loss on the test set is {test_results:.4f}")
+    #         test_results = np.array(test_results)
+    #     else:
+    #         test_results = []
+    #         for i in range(1, cv + 1):
+    #             print(f"Cross validation at split {i}/{cv}")
+    #             data.next()
+    #             epochs, run_batch_size = self.get_epochs_and_run_batch_size(data, self.params['max_steps'], batch_size)
+    #             encoded_data = Preprocessing(data, self.p)
+    #             self.run_logger.define_cacher(cv=i, improvements_necessary=self.cacher_improvements_necessary)
+    #             self.build_npt(encoded_data)
+    #             self.build_optimizer()
+    #             self.build_loss_function(encoded_data)
+    #             self.train(encoded_data, epochs, run_batch_size)
+    #             test_eval = self.test(encoded_data)
+    #             print(f"The evaluation metric loss on the test set is {test_eval:.4f}")
+    #             test_results.append(test_eval)
+    #         test_results = np.array(test_results)
+    #     self.calculate_and_save_results(test_results)

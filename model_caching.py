@@ -36,5 +36,4 @@ class Model_Cacher():
         self.improvements_since_last_caching = 0
 
     def load_model(self,model):
-        #return model.load(self.best_model)
         model.load_state_dict(torch.load(self.best_model))
