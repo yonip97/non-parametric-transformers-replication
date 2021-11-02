@@ -77,14 +77,14 @@ class Trainer():
                 self.step_each_n_batches = math.ceil(batch_size / MAX_BATCH_SIZE)
                 return epochs, MAX_BATCH_SIZE
 
-    def run(self, data, batch_size, cv=None, test=None):
-        if test is None:
+    def run(self, data, batch_size, cv=None, experiment=None):
+        if experiment is None:
             self.run_training(data, batch_size, cv)
-        if test == 'duplicate':
+        if experiment == 'duplicate':
             self.run_training(data,batch_size,cv,True)
-        elif test == 'corruption':
-            self.run_corroption(data, batch_size, cv)
-        elif test == 'deletion':
+        elif experiment == 'corruption':
+            self.corruption_experiment(data, batch_size, cv)
+        elif experiment == 'deletion':
             self.run_deletion(data, batch_size, cv)
 
     def run_training(self, data, batch_size, cv=None,duplicate = False):
@@ -98,9 +98,10 @@ class Trainer():
             self.build_loss_function(encoded_data)
             if duplicate:
                 self.duplicate_experiment(encoded_data, epochs, run_batch_size)
+                run_results = self.test_duplicate(encoded_data)
             else:
                 self.train(encoded_data, epochs, run_batch_size)
-            run_results = self.test(encoded_data)
+                run_results = self.test(encoded_data)
             for metric,score in run_results.items():
                 print(f"The {metric} loss on the test set is {score:.4f}")
                 results[metric] = np.array(score)
@@ -116,9 +117,10 @@ class Trainer():
                 self.build_loss_function(encoded_data)
                 if duplicate:
                     self.duplicate_experiment(encoded_data, epochs, run_batch_size)
+                    run_result = self.test(encoded_data)
                 else:
                     self.train(encoded_data, epochs, run_batch_size)
-                run_result = self.test(encoded_data)
+                    run_result = self.test(encoded_data)
                 for metric,score in run_result.items():
                     print(f"The {metric} loss on the test set is {score:.4f}")
                     if metric not in results.keys():
@@ -155,14 +157,14 @@ class Trainer():
                 eval_loss = self.pass_through(X_val.to(self.device), M_val.to(self.device),
                                               orig_val_data.to(self.device))
                 self.run_logger.check_improvement(self.model, eval_loss, epoch)
-                if epoch % self.print_steps:
+                if epoch % self.print_steps == 0:
                     print(f"Time for {self.eval_steps} epochs is {time.time() - start:.3f} seconds")
                     print(f"Current lr is {self.optimizer.param_groups[0]['lr']:.6f}")
                     print(f"The validation loss is {eval_loss:.3f} after {epoch} epochs")
                     print(f"Model loss was {batch_loss:.3f} after {epoch} epochs")
                     start = time.time()
                 self.model.train()
-            self.step()
+            self.optimizer.zero_grad()
             self.batches_per_epoch = 0
 
     def pass_through(self, batch_X, batch_M, batch_real_data):
@@ -195,23 +197,6 @@ class Trainer():
             return
         elif self.tradeoff_scheduler == 'cosine':
             self.loss_function.Scheduler_cosine_step()
-
-    # def evaluate(self, data, eval_X, eval_M, true_labels):
-    #     evaluation_metrics_results = {}
-    #     self.model.eval()
-    #     with torch.no_grad():
-    #         z = self.model.forward(eval_X.to(self.device), eval_M.to(self.device))
-    #         pred = z[data.target_col].detach().cpu()
-    #         if data.target_type == 'continuous':
-    #             pred *= data.stats[data.target_col]['std']
-    #             pred += data.stats[data.target_col]['mean']
-    #             true_labels *= data.stats[data.target_col]['std']
-    #             true_labels += data.stats[data.target_col]['mean']
-    #         for eval_metric in self.eval_metric:
-    #             eval_loss = evaluation_metrics_dict[eval_metric].compute(pred, true_labels, eval_M[:, -1])
-    #             evaluation_metrics_results[eval_metric] = eval_loss
-    #     self.model.train()
-    #     return evaluation_metrics_results
 
     def test(self, data):
         evaluation_metrics_results = {}
@@ -256,21 +241,22 @@ class Trainer():
                 eval_loss = self.pass_through(X_val_modified.to(self.device), M_val_modified.to(self.device),
                                               orig_val_data_modified.to(self.device))
                 self.run_logger.check_improvement(self.model, eval_loss, epoch)
-                if epoch % self.print_steps:
+                if epoch % self.print_steps == 0:
                     print(f"Time for {self.eval_steps} epochs is {time.time() - start:.3f} seconds")
                     print(f"Current lr is {self.optimizer.param_groups[0]['lr']:.6f}")
                     print(f"The validation loss is {eval_loss:.3f} after {epoch} epochs")
                     print(f"Model loss was {batch_loss:.3f} after {epoch} epochs")
                     start = time.time()
                 self.model.train()
-            self.step()
+            self.optimizer.zero_grad()
             self.batches_per_epoch = 0
 
     def test_duplicate(self,data):
+        evaluation_metrics_results = {}
         self.run_logger.load_model(self.model)
         X_test, M_test, orig_test_tensors = data.get('test')
         X_test_modified = torch.cat((X_test,orig_test_tensors),0)
-        M_test_modified = torch.cat((M_test,torch.zeros(M_test.shape())),0)
+        M_test_modified = torch.cat((M_test,torch.zeros(M_test.shape)),0)
         true_labels = torch.cat((orig_test_tensors[:, -1],orig_test_tensors[:, -1]),0)
         self.model.eval()
         with torch.no_grad():
@@ -281,11 +267,13 @@ class Trainer():
                 pred += data.stats[data.target_col]['mean']
                 true_labels *= data.stats[data.target_col]['std']
                 true_labels += data.stats[data.target_col]['mean']
-            test_metric_loss = self.eval_metrics.compute(pred, true_labels, M_test[:, -1])
+            for eval_metric, eval_metric_instance in self.eval_metrics.items():
+                eval_loss = eval_metric_instance.compute(pred, true_labels, M_test[:, -1])
+                evaluation_metrics_results[eval_metric] = eval_loss
         self.model.train()
-        return test_metric_loss
+        return evaluation_metrics_results
 
-    def data_corruption(self, data, batch_size, cv=None):
+    def corruption_experiment(self, data, batch_size, cv=None):
         self.run_training(data, batch_size, cv)
         full_set = np.concatenate((data.train_data, data.val_data, data.test_data), axis=0)
         full_data = utils_data.TensorDataset(torch.tensor(full_set, requires_grad=False, dtype=torch.float))
@@ -539,3 +527,19 @@ class Trainer():
     #             test_results.append(test_eval)
     #         test_results = np.array(test_results)
     #     self.calculate_and_save_results(test_results)
+    # def evaluate(self, data, eval_X, eval_M, true_labels):
+    #     evaluation_metrics_results = {}
+    #     self.model.eval()
+    #     with torch.no_grad():
+    #         z = self.model.forward(eval_X.to(self.device), eval_M.to(self.device))
+    #         pred = z[data.target_col].detach().cpu()
+    #         if data.target_type == 'continuous':
+    #             pred *= data.stats[data.target_col]['std']
+    #             pred += data.stats[data.target_col]['mean']
+    #             true_labels *= data.stats[data.target_col]['std']
+    #             true_labels += data.stats[data.target_col]['mean']
+    #         for eval_metric in self.eval_metric:
+    #             eval_loss = evaluation_metrics_dict[eval_metric].compute(pred, true_labels, eval_M[:, -1])
+    #             evaluation_metrics_results[eval_metric] = eval_loss
+    #     self.model.train()
+    #     return evaluation_metrics_results

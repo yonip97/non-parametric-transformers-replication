@@ -18,7 +18,6 @@ class Model_Cacher():
             self.improvements_since_last_caching +=1
             print("Improvement in  the model")
             if self.improvements_since_last_caching >= self.improvements_necessary:
-                #print("Caching model")
                 return True
         return False
 
