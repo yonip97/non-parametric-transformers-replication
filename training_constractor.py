@@ -229,6 +229,7 @@ class Trainer():
                 batch_X_modified,batch_M_modified,train_loss_indices_modified,batch_real_data_modified = self.duplicate(batch_data)
                 batch_loss = self.pass_through(batch_X_modified, batch_M_modified,train_loss_indices_modified, batch_real_data_modified)
             if epoch % self.eval_steps == 0:
+                self.model.eval()
                 data_tuple = [item.to(self.device) for item in encoded_data.masking('val')]
                 X_val_modified,M_val_modified,val_loss_indices_modified,orig_data_modified = self.duplicate(data_tuple)
                 eval_loss = self.pass_through(X_val_modified.to(self.device), M_val_modified.to(self.device),
