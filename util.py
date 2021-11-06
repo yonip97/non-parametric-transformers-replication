@@ -40,7 +40,6 @@ class Input_Embbeding(nn.Module):
         super(Input_Embbeding, self).__init__()
         self.continuous = encoded_data.continuous
         self.categorical = encoded_data.categorical
-        self.encoders = encoded_data.encoders
         self.index_embedding = nn.Embedding(len(self.categorical.keys()) + len(self.continuous), encoded_data.embedding_dim)
         self.into_cat = nn.ModuleDict({str(col): nn.Linear(classes + 1, encoded_data.embedding_dim) for col, classes in self.categorical.items()})
         self.into_cont = nn.ModuleDict({str(col): nn.Linear(2, encoded_data.embedding_dim) for col in self.continuous})
@@ -60,8 +59,6 @@ class Input_Embbeding(nn.Module):
         encodings = {}
         for col, classes in self.categorical.items():
             encoded_col = torch.zeros((X[:,col].shape[0],classes)).long().to(self.device)
-            #encoded_col = self.one_hot_encode(X[:,col],col).to(self.device)
-            #encoded_col = torch.tensor(self.encoders[col].transform(X[:, col].view(-1,1).to_numpy()))
             ind = X[:,col] != -1
             to_encode = X[ind,col].long()
             if to_encode.nelement() != 0:
@@ -75,8 +72,6 @@ class Input_Embbeding(nn.Module):
         encodings_list = [item[1] for item in encodings_list]
         return torch.stack(encodings_list, dim=1)
 
-    def one_hot_encode(self,data,col):
-        return torch.tensor(self.encoders[col].transform(data.view(-1, 1).cpu().numpy()))
 
 class Output_Encoding(nn.Module):
     def __init__(self, encoded_data, device):

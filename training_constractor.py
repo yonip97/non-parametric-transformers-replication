@@ -5,8 +5,6 @@ from lamb import Lamb
 from torch import autograd
 import time
 import torch.utils.data as utils_data
-import numpy as np
-# from evaluation_metrics import *
 from util import permute
 import math
 from npt import NPT
@@ -18,7 +16,7 @@ from run_documentation import run_logger
 from util import probs
 from evaluation_metrics import *
 
-MAX_BATCH_SIZE = 1024
+MAX_BATCH_SIZE = 1100
 evaluation_metrics_dict = {'acc': acc, 'nll': nll, 'rmse': rmse, 'mse': mse}
 
 
@@ -61,18 +59,18 @@ class Trainer():
 
     def get_epochs_and_run_batch_size(self, data, max_steps, batch_size):
         if batch_size == -1:
-            if len(data.train_data) <= MAX_BATCH_SIZE:
-                return max_steps, len(data.train_data)
+            if data.orig_tensors.size(0) <= MAX_BATCH_SIZE:
+                return max_steps,data.orig_tensors.size(0)
             else:
-                self.step_each_n_batches = math.ceil(len(data.train_data) / MAX_BATCH_SIZE)
+                self.step_each_n_batches = math.ceil(data.orig_tensors.size(0) / MAX_BATCH_SIZE)
                 return max_steps, MAX_BATCH_SIZE
         else:
             if batch_size <= MAX_BATCH_SIZE:
-                steps_per_epoch = math.ceil(len(data.train_data) / batch_size)
+                steps_per_epoch = math.ceil(data.orig_tensors.size(0) / batch_size)
                 epochs = math.ceil(max_steps / steps_per_epoch)
                 return epochs, batch_size
             else:
-                steps_per_epoch = math.ceil(len(data.train_data) / MAX_BATCH_SIZE)
+                steps_per_epoch = math.ceil(data.orig_tensors.size(0) / MAX_BATCH_SIZE)
                 epochs = math.ceil(max_steps / steps_per_epoch)
                 self.step_each_n_batches = math.ceil(batch_size / MAX_BATCH_SIZE)
                 return epochs, MAX_BATCH_SIZE
@@ -91,8 +89,8 @@ class Trainer():
         results = {}
         if cv == None:
             self.run_logger.define_cacher(improvements_necessary=self.cacher_improvements_necessary)
-            epochs, run_batch_size = self.get_epochs_and_run_batch_size(data, self.params['max_steps'], batch_size)
             encoded_data = Preprocessing(data, self.p)
+            epochs, run_batch_size = self.get_epochs_and_run_batch_size(encoded_data, self.params['max_steps'], batch_size)
             self.build_npt(encoded_data)
             self.build_optimizer()
             self.build_loss_function(encoded_data)
@@ -110,8 +108,8 @@ class Trainer():
                 print(f"Cross validation at split {i}/{cv}")
                 data.next()
                 self.run_logger.define_cacher(cv=i, improvements_necessary=self.cacher_improvements_necessary)
-                epochs, run_batch_size = self.get_epochs_and_run_batch_size(data, self.params['max_steps'], batch_size)
                 encoded_data = Preprocessing(data, self.p)
+                epochs, run_batch_size = self.get_epochs_and_run_batch_size(encoded_data, self.params['max_steps'], batch_size)
                 self.build_npt(encoded_data)
                 self.build_optimizer()
                 self.build_loss_function(encoded_data)
@@ -141,21 +139,22 @@ class Trainer():
             self.run_logger.save_run_metric_results(printable_results)
 
     def train(self, encoded_data, epochs, batch_size):
-        X_train, M_train, orig_train_data = encoded_data.get('train')
-        X_val, M_val, orig_val_data = encoded_data.get('val')
-        train = utils_data.TensorDataset(X_train.to(self.device), M_train.to(self.device),
-                                         orig_train_data.to(self.device))
-        train_loader = utils_data.DataLoader(train, batch_size=batch_size, shuffle=True)
         start = time.time()
         for epoch in range(1, epochs + 1):
+            X_train,M_train,train_loss_indices,orig_data = encoded_data.masking('train')
+            train = utils_data.TensorDataset(X_train.to(self.device), M_train.to(self.device),train_loss_indices.to(self.device),
+                                             orig_data.to(self.device))
+            train_loader = utils_data.DataLoader(train, batch_size=batch_size, shuffle=False)
             for batch_data in train_loader:
                 self.batches_per_epoch += 1
-                batch_X, batch_M, batch_real_data = batch_data
-                batch_loss = self.pass_through(batch_X, batch_M, batch_real_data)
+                batch_X, batch_M,batch_loss_indices, batch_real_data = batch_data
+                batch_loss = self.pass_through(batch_X, batch_M,batch_loss_indices, batch_real_data)
             if epoch % self.eval_steps == 0:
                 self.model.eval()
-                eval_loss = self.pass_through(X_val.to(self.device), M_val.to(self.device),
-                                              orig_val_data.to(self.device))
+                #TODO: replace this masking with randomized shuffle because the mask of the validation set is constant
+                X_val, M_val, val_loss_indices,orig_data = encoded_data.masking('val')
+                eval_loss = self.pass_through(X_val.to(self.device), M_val.to(self.device),val_loss_indices.to(self.device),
+                                              orig_data.to(self.device))
                 self.run_logger.check_improvement(self.model, eval_loss, epoch)
                 if epoch % self.print_steps == 0:
                     print(f"Time for {self.eval_steps} epochs is {time.time() - start:.3f} seconds")
@@ -167,17 +166,17 @@ class Trainer():
             self.optimizer.zero_grad()
             self.batches_per_epoch = 0
 
-    def pass_through(self, batch_X, batch_M, batch_real_data):
+    def pass_through(self, batch_X, batch_M, loss_indices, batch_real_data):
         if self.model.training:
             z = self.model.forward(batch_X, batch_M)
-            batch_loss = self.loss_function.compute(z, batch_real_data, batch_M)
+            batch_loss = self.loss_function.compute(z, batch_real_data, loss_indices)
             batch_loss.backward()
             if self.batches_per_epoch % self.step_each_n_batches == 0:
                 self.step()
         else:
             with torch.no_grad():
                 z = self.model.forward(batch_X, batch_M)
-                batch_loss = self.loss_function.val_loss(z, batch_real_data, batch_M)
+                batch_loss = self.loss_function.val_loss(z, batch_real_data, loss_indices)
         return batch_loss.item()
 
     def step(self):
@@ -201,8 +200,8 @@ class Trainer():
     def test(self, data):
         evaluation_metrics_results = {}
         self.run_logger.load_model(self.model)
-        X_test, M_test, orig_test_tensors = data.get('test')
-        true_labels = orig_test_tensors[:,-1]
+        X_test, M_test, test_loss_indices,orig_data = data.masking('test')
+        true_labels = orig_data[:,-1]
         self.model.eval()
         with torch.no_grad():
             z = self.model.forward(X_test.to(self.device), M_test.to(self.device))
@@ -213,33 +212,28 @@ class Trainer():
                 true_labels *= data.stats[data.target_col]['std']
                 true_labels += data.stats[data.target_col]['mean']
             for eval_metric,eval_metric_instance in self.eval_metrics.items():
-                eval_loss = eval_metric_instance.compute(pred, true_labels, M_test[:, -1])
+                eval_loss = eval_metric_instance.compute(pred, true_labels,test_loss_indices[:,-1])
                 evaluation_metrics_results[eval_metric] = eval_loss
         self.model.train()
         return evaluation_metrics_results
 
     def duplicate_experiment(self, encoded_data, epochs, batch_size):
-        X_train, M_train, orig_train_data = encoded_data.get('train')
-        X_val, M_val, orig_val_data = encoded_data.get('val')
-        X_val_modified = torch.cat((X_val,orig_val_data),0)
-        M_val_modified = torch.cat((M_val,torch.zeros(M_val.shape)),0)
-        orig_val_data_modified = torch.cat((orig_val_data,orig_val_data),0)
-        train = utils_data.TensorDataset(X_train.to(self.device), M_train.to(self.device),
-                                         orig_train_data.to(self.device))
-        train_loader = utils_data.DataLoader(train, batch_size=batch_size, shuffle=True)
         start = time.time()
         for epoch in range(1, epochs + 1):
+            X_train,M_train,train_loss_indices,orig_data = encoded_data.masking('train')
+            train = utils_data.TensorDataset(X_train.to(self.device), M_train.to(self.device),train_loss_indices.to(self.device),
+                                             orig_data.to(self.device))
+            train_loader = utils_data.DataLoader(train, batch_size=batch_size, shuffle=False)
             for batch_data in train_loader:
                 self.batches_per_epoch += 1
-                batch_X, batch_M, batch_real_data = batch_data
-                batch_X_modified = torch.cat((batch_X, batch_real_data), 0)
-                batch_M_modified = torch.cat((batch_M, torch.zeros(batch_M.shape).to(self.device)), 0)
-                batch_real_data_modified = torch.cat((batch_real_data,batch_real_data),0)
-                batch_loss = self.pass_through(batch_X_modified, batch_M_modified, batch_real_data_modified)
+                batch_X_modified,batch_M_modified,train_loss_indices_modified,batch_real_data_modified = self.duplicate(batch_data)
+                batch_loss = self.pass_through(batch_X_modified, batch_M_modified,train_loss_indices_modified, batch_real_data_modified)
             if epoch % self.eval_steps == 0:
-                self.model.eval()
+                data_tuple = [item.to(self.device) for item in encoded_data.masking('val')]
+                X_val_modified,M_val_modified,val_loss_indices_modified,orig_data_modified = self.duplicate(data_tuple)
                 eval_loss = self.pass_through(X_val_modified.to(self.device), M_val_modified.to(self.device),
-                                              orig_val_data_modified.to(self.device))
+                                              val_loss_indices_modified.to(self.device),
+                                              orig_data_modified.to(self.device))
                 self.run_logger.check_improvement(self.model, eval_loss, epoch)
                 if epoch % self.print_steps == 0:
                     print(f"Time for {self.eval_steps} epochs is {time.time() - start:.3f} seconds")
@@ -254,10 +248,9 @@ class Trainer():
     def test_duplicate(self,data):
         evaluation_metrics_results = {}
         self.run_logger.load_model(self.model)
-        X_test, M_test, orig_test_tensors = data.get('test')
-        X_test_modified = torch.cat((X_test,orig_test_tensors),0)
-        M_test_modified = torch.cat((M_test,torch.zeros(M_test.shape)),0)
-        true_labels = torch.cat((orig_test_tensors[:, -1],orig_test_tensors[:, -1]),0)
+        data_tuple = [item.to(self.device) for item in data.masking('test')]
+        X_test_modified,M_test_modified,test_loss_indices_modified,orig_data_modified = self.duplicate(data_tuple)
+        true_labels = orig_data_modified[:,-1].detach().cpu()
         self.model.eval()
         with torch.no_grad():
             z = self.model.forward(X_test_modified.to(self.device), M_test_modified.to(self.device))
@@ -268,10 +261,19 @@ class Trainer():
                 true_labels *= data.stats[data.target_col]['std']
                 true_labels += data.stats[data.target_col]['mean']
             for eval_metric, eval_metric_instance in self.eval_metrics.items():
-                eval_loss = eval_metric_instance.compute(pred, true_labels, M_test[:, -1])
+                eval_loss = eval_metric_instance.compute(pred, true_labels, test_loss_indices_modified[:,-1].detach().cpu())
                 evaluation_metrics_results[eval_metric] = eval_loss
         self.model.train()
         return evaluation_metrics_results
+
+    def duplicate(self,data_tuple):
+        X,M,loss_indices,real_data = data_tuple
+        X_modified = torch.cat((X, real_data), 0)
+        M_modified = torch.cat((M, torch.zeros(M.shape).to(self.device)), 0)
+        loss_indices_modified = torch.cat(
+            (loss_indices, torch.zeros(loss_indices.shape).to(self.device)), 0)
+        real_data_modified = torch.cat((real_data, real_data), 0)
+        return X_modified,M_modified,loss_indices_modified,real_data_modified
 
     def corruption_experiment(self, data, batch_size, cv=None):
         self.run_training(data, batch_size, cv)

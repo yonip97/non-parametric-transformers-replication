@@ -58,12 +58,6 @@ def main(args):
         trainer = Trainer(params_dict=params_dict,data=data,device=device,experiment=args.experiment)
         trainer.run(data,batch_size,cv,experiment=args.experiment)
 
-def custom_parser(args):
-    args.flat = 0.5
-    args.lr = 5e-4
-    args.embedding_dim = 32
-    args.experiment = 'duplicate'
-    args.evaluation_metrics = 'nll'
 
 def build_parser():
     parser = argparse.ArgumentParser()
@@ -82,7 +76,7 @@ def build_parser():
     parser.add_argument('--init_tradeoff',type=float,default=1)
     parser.add_argument('--batch_size',type=int,default=-1)
     parser.add_argument('--evaluation_metrics',type=str,default='rmse')
-    parser.add_argument('--device',type=str,default='cuda:1')
+    parser.add_argument('--device',type=str,default='cuda:2')
     parser.add_argument('--flat',type=float,default=0.7)
     parser.add_argument('--cv',type=int,default=None)
     parser.add_argument('--clip',type=int,default=1)
@@ -98,5 +92,4 @@ def build_parser():
 if __name__ == '__main__':
     parser = build_parser()
     args = parser.parse_args()
-    custom_parser(args)
     main(args)
