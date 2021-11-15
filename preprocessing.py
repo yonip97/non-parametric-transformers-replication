@@ -16,6 +16,7 @@ from torch.nn import functional as F
 class Preprocessing():
     def __init__(self, data, p):
         self.data = data
+        self.split = data.split
         self.p = p
         self.target_col = data.target_col
         self.target_type = data.target_type
@@ -44,14 +45,20 @@ class Preprocessing():
         self.test_features_size = self.data.test_data[:, :-1].shape
         self.test_labels_size = self.data.test_data[:, -1].shape
         train_data = np.copy(self.data.train_data)
+        self.orig_train_tensors = self.normalize(train_data)
         val_data = np.copy(self.data.val_data)
+        self.orig_val_tensors = self.normalize(val_data)
         test_data = np.copy(self.data.test_data)
-        data = np.concatenate((train_data, val_data, test_data), axis=0)
+        self.orig_test_tensors = self.normalize(test_data)
+
+
+    def normalize(self,data):
         for col in self.data.continuous:
             data[:, col] = (data[:, col] - self.stats[col]['mean']) / self.stats[col]['std']
-        self.orig_tensors = torch.tensor(data, dtype=torch.float)
+        return data
 
-    def masking(self, set):
+
+    def masking(self, set,batch_size,device):
         '''
         :param set:is the masking done on the train,validation or test set.
         if the masking is done on the train set then random indices and labels of the training set will be masked,
@@ -106,11 +113,52 @@ class Preprocessing():
             train_loss_indices = np.zeros(mask_train.shape)
             val_loss_indices = np.zeros(mask_val.shape)
             test_loss_indices = mask_test.copy()
-        mask = torch.tensor(np.concatenate((mask_train, mask_val, mask_test), axis=0))
-        loss_indices = torch.tensor(np.concatenate((train_loss_indices, val_loss_indices, test_loss_indices), axis=0))
-        masked_data, mask = self._transform_data(mask)
-        data = self.orig_tensors.clone()
-        return self.shuffle(masked_data, mask, loss_indices, data)
+        if set == 'test':
+            train_masked = self._transform_data(self.orig_train_tensors.clone(),mask_train)
+            train_masked,mask_train,train_loss_indices,orig_train_tensors = self.shuffle(train_masked,mask_train,train_loss_indices,self.orig_train_tensors.clone())
+            val_masked = self._transform_data(self.orig_val_tensors.clone(),mask_val)
+            val_masked,mask_val,val_loss_indices,orig_val_tensors = self.shuffle(val_masked,mask_val,val_loss_indices,self.orig_val_tensors.clone())
+            test_masked = self._transform_data(self.orig_test_tensors.clone(),mask_test)
+            test_masked,mask_test,test_loss_indices,orig_test_tensors = self.shuffle(test_masked,mask_test,test_loss_indices,self.orig_test_tensors.clone())
+            train_indexes,val_indexes,test_indexes = self.define_mini_batches(len(train_masked),len(val_masked),len(test_masked),batch_size,self.split)
+            batches = []
+            for indexes in zip(train_indexes,val_indexes,test_indexes):
+                masked_batch = self.construct_batches(indexes,(train_masked,val_masked,test_masked))
+                batch_mask = self.construct_batches(indexes,(mask_train,mask_val,mask_test))
+                batch_loss_indices = self.construct_batches(indexes,(train_loss_indices,val_loss_indices,test_loss_indices))
+                batch_orig_data = self.construct_batches(indexes,(orig_train_tensors,orig_val_tensors,orig_test_tensors))
+                batches.append((masked_batch,batch_mask,batch_loss_indices,batch_orig_data))
+            return batches
+        else:
+            mask = torch.tensor(np.concatenate((mask_train, mask_val, mask_test), axis=0))
+            loss_indices = torch.tensor(np.concatenate((train_loss_indices, val_loss_indices, test_loss_indices), axis=0))
+            data = torch.cat((self.orig_train_tensors,self.orig_val_tensors,self.orig_test_tensors),dim=0)
+            masked_data, mask = self._transform_data(data,mask)
+            return self.shuffle(masked_data, mask, loss_indices, data)
+    def construct_batches(self,indexes,data):
+        batch = []
+        for index,data in zip(indexes,data):
+            batch.append(data[index])
+        return torch.cat(batch)
+    def define_mini_batches(self,train,val,test,final_batch_size,split):
+        train_batch_size = int(final_batch_size * split['train'])
+        val_batch_size = int(final_batch_size * split['val'])
+        test_batch_size = int(final_batch_size * split['test'])
+        train_indexes = list(range(train))
+        val_indexes = list(range(val))
+        test_indexes = list(range(test))
+        train_chunked = []
+        val_chunked = []
+        test_chunked = []
+        for i in range(0,train,train_batch_size):
+            train_chunked.append(train_indexes[i:i+train_batch_size])
+        for i in range(0,val,val_batch_size):
+            val_chunked.append(val_indexes[i:i+val_batch_size])
+        for i in range(0,test,test_batch_size):
+            test_chunked.append(test_indexes[i:i+test_batch_size])
+        return train_chunked,val_chunked,test_chunked
+
+
 
     def shuffle(self, masked_data, mask, loss_indices, data):
         order = torch.randperm(data.size(0))
@@ -125,8 +173,7 @@ class Preprocessing():
     #         mask[nan_indices, col] = 1
     #     return mask
 
-    def _transform_data(self, mask):
-        data = self.orig_tensors.clone()
+    def _transform_data(self, data,mask):
         data_dict = {}
         to_zero_indices = mask == 1
         randomize_indices = mask == 2

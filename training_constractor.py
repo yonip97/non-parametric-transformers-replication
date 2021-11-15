@@ -153,6 +153,9 @@ class Trainer():
                 self.model.eval()
                 #TODO: replace this masking with randomized shuffle because the mask of the validation set is constant
                 X_val, M_val, val_loss_indices,orig_data = encoded_data.masking('val')
+                validation = utils_data.TensorDataset(X_val.to(self.device),M_val.to(self.device),val_loss_indices.to(self.device),
+                                                orig_data.to(self.device))
+
                 eval_loss = self.pass_through(X_val.to(self.device), M_val.to(self.device),val_loss_indices.to(self.device),
                                               orig_data.to(self.device))
                 self.run_logger.check_improvement(self.model, eval_loss, epoch)
@@ -174,9 +177,12 @@ class Trainer():
             if self.batches_per_epoch % self.step_each_n_batches == 0:
                 self.step()
         else:
+            val_time = time.time()
             with torch.no_grad():
+                #self.model.input_embedding.change_device('cpu')
                 z = self.model.forward(batch_X, batch_M)
                 batch_loss = self.loss_function.val_loss(z, batch_real_data, loss_indices)
+            print(f"validation_time {time.time()-val_time}")
         return batch_loss.item()
 
     def step(self):

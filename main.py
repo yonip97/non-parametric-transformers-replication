@@ -61,7 +61,7 @@ def main(args):
 
 def build_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset',type=str,default='breast_cancer')
+    parser.add_argument('--dataset',type=str,default='yacht')
     parser.add_argument('--amount_of_seeds',type=int,default=1)
     parser.add_argument('--seeds',type = str, default=None)
     parser.add_argument('--lr',type=float,default=1e-3)

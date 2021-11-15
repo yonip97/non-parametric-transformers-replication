@@ -72,6 +72,10 @@ class Input_Embbeding(nn.Module):
         encodings_list = [item[1] for item in encodings_list]
         return torch.stack(encodings_list, dim=1)
 
+    def change_device(self,device):
+        self.device = device
+        self.cat_index = self.cat_index.to(self.device)
+        self.cont_index = self.cont_index.to(self.device)
 
 class Output_Encoding(nn.Module):
     def __init__(self, encoded_data, device):
