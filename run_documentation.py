@@ -43,7 +43,7 @@ class run_logger():
 
     def check_improvement(self,model,val_loss,epoch):
         if self.model_cacher.check_if_cache(val_loss):
-            self.model_cacher.cache(model,val_loss,epoch)
+            self.model_cacher.cache(model,epoch)
 
     def load_model(self, model):
         self.model_cacher.load_model(model)

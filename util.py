@@ -38,13 +38,13 @@ class Input_Embbeding(nn.Module):
         learnable weights of the columns
         '''
         super(Input_Embbeding, self).__init__()
-        self.continuous = encoded_data.continuous
-        self.categorical = encoded_data.categorical
-        self.index_embedding = nn.Embedding(len(self.categorical.keys()) + len(self.continuous), encoded_data.embedding_dim)
-        self.into_cat = nn.ModuleDict({str(col): nn.Linear(classes + 1, encoded_data.embedding_dim) for col, classes in self.categorical.items()})
-        self.into_cont = nn.ModuleDict({str(col): nn.Linear(2, encoded_data.embedding_dim) for col in self.continuous})
+        self.continuous = encoded_data.data.continuous
+        self.categorical = encoded_data.data.categorical
+        self.index_embedding = nn.Embedding(len(self.categorical.keys()) + len(self.continuous), encoded_data.data.embedding_dim)
+        self.into_cat = nn.ModuleDict({str(col): nn.Linear(classes + 1, encoded_data.data.embedding_dim) for col, classes in self.categorical.items()})
+        self.into_cont = nn.ModuleDict({str(col): nn.Linear(2, encoded_data.data.embedding_dim) for col in self.continuous})
         self.device = device
-        self.type_embedding = nn.Embedding(2, encoded_data.embedding_dim)
+        self.type_embedding = nn.Embedding(2, encoded_data.data.embedding_dim)
         self.cat_index = torch.tensor(0).to(device)
         self.cont_index = torch.tensor(1).to(device)
         self.to(device)
@@ -62,15 +62,17 @@ class Input_Embbeding(nn.Module):
             ind = X[:,col] != -1
             to_encode = X[ind,col].long()
             if to_encode.nelement() != 0:
-                encoded_col[ind] = F.one_hot(to_encode)
+                encoded_col[ind] = F.one_hot(to_encode,num_classes = classes)
             encodings[col] = self.into_cat[str(col)](torch.cat((encoded_col, M[:, col].unsqueeze(dim=1).long()), dim=1).float())
-            encodings[col] += self.index_embedding(torch.tensor(col).to(self.device)) + self.type_embedding(self.cat_index)
+            #encodings[col] += self.index_embedding(torch.tensor(col).to(self.device)) + self.type_embedding(self.cat_index)
         for col in self.continuous:
             encodings[col] = self.into_cont[str(col)](torch.stack((X[:, col], M[:, col]), dim=1))
-            encodings[col] += self.index_embedding(torch.tensor(col).to(self.device)) + self.type_embedding(self.cont_index)
-        encodings_list = sorted([(key, item) for key, item in encodings.items()])
-        encodings_list = [item[1] for item in encodings_list]
-        return torch.stack(encodings_list, dim=1)
+            #encodings[col] += self.index_embedding(torch.tensor(col).to(self.device)) + self.type_embedding(self.cont_index)
+        # encodings_list = sorted([(key, item) for key, item in encodings.items()])
+        # encodings_list = [item[1] for item in encodings_list]
+        # return torch.stack(encodings_list, dim=1)
+        return encodings
+
 
     def change_device(self,device):
         self.device = device
@@ -87,10 +89,10 @@ class Output_Encoding(nn.Module):
         :param device: cuda or cpu
         '''
         super(Output_Encoding, self).__init__()
-        self.cat = encoded_data.categorical.keys()
-        self.cont = encoded_data.continuous
-        self.out_cat = nn.ModuleDict({str(col): nn.Linear(encoded_data.embedding_dim, encoded_data.categorical[col]) for col in encoded_data.categorical.keys()})
-        self.out_cont = nn.ModuleDict({str(col): nn.Linear(encoded_data.embedding_dim, 1) for col in encoded_data.continuous})
+        self.cat = encoded_data.data.categorical.keys()
+        self.cont = encoded_data.data.continuous
+        self.out_cat = nn.ModuleDict({str(col): nn.Linear(encoded_data.data.embedding_dim, encoded_data.data.categorical[col]) for col in encoded_data.data.categorical.keys()})
+        self.out_cont = nn.ModuleDict({str(col): nn.Linear(encoded_data.data.embedding_dim, 1) for col in encoded_data.data.continuous})
         self.to(device)
 
     def forward(self, H):
@@ -104,13 +106,8 @@ class Output_Encoding(nn.Module):
         for col in self.cont:
              z[col] = self.out_cont[str(col)](H[:, col, :]).squeeze()
         return z
-        # else:
-        #     z = {}
-        #     for col in self.cat:
-        #         z[col] = torch.argmax(self.out_cat[str(col)](H[:, col, :]),dim=1).float()
-        #     for col in self.cont:
-        #         z[col] = self.out_cont[str(col)](H[:, col, :]).squeeze()
-        #     return torch.stack([x[1] for x in sorted(z.items())],dim=1)
+
+
 
 def permute(X,i):
     temp_x = X[i, :].unsqueeze(dim = 0)

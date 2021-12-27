@@ -8,10 +8,9 @@ from torch.nn import NLLLoss,MSELoss,LogSoftmax
 class acc():
     @staticmethod
     def compute(pred_labels, true_labels,mask):
-        # temporary
         pred_labels = torch.argmax(pred_labels,dim=1)
         true_labels = torch.tensor(true_labels).long()
-        return torch.sum((pred_labels == true_labels).float() * mask)/torch.sum(mask)
+        return torch.sum((pred_labels == true_labels).float() * mask)
 
 
 class nll():
@@ -20,7 +19,7 @@ class nll():
         self.logsoftmax =LogSoftmax(dim = 1)
 
     def compute(self,pred_labels, true_labels,mask):
-        return (torch.sum(self.loss.forward(self.logsoftmax(pred_labels),true_labels.long())*mask)/torch.sum(mask)).item()
+        return (torch.sum(self.loss.forward(self.logsoftmax(pred_labels),true_labels.long())*mask)).item()
 
 
 class auc_roc():
@@ -35,7 +34,7 @@ class mse():
 
     def compute(self,pred_labels, true_labels,mask):
         true_labels = torch.tensor(true_labels).float()
-        return torch.sum(self.loss.forward(pred_labels,true_labels)*mask)/torch.sum(mask)
+        return torch.sum(self.loss.forward(pred_labels,true_labels)*mask)
 
 class rmse():
     def __init__(self):

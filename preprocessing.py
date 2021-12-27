@@ -1,3 +1,4 @@
+import math
 import time
 
 import torch
@@ -18,12 +19,12 @@ class Preprocessing():
         self.data = data
         self.split = data.split
         self.p = p
-        self.target_col = data.target_col
-        self.target_type = data.target_type
-        self.categorical = data.categorical
-        self.continuous = data.continuous
-        self.embedding_dim = data.embedding_dim
-        self.input_dim = data.input_dim
+        # self.target_col = data.target_col
+        # self.target_type = data.target_type
+        # self.categorical = data.categorical
+        # self.continuous = data.continuous
+        # self.embedding_dim = data.embedding_dim
+        # self.input_dim = data.input_dim
         self._preprocess()
 
     def _preprocess(self):
@@ -38,27 +39,31 @@ class Preprocessing():
             self.stats[col]['std'] = np.nanstd(self.data.train_data[:, col])
 
     def _standrize_and_save(self):
-        self.train_features_size = self.data.train_data[:, :-1].shape
-        self.train_labels_size = self.data.train_data[:, -1].shape
-        self.val_features_size = self.data.val_data[:, :-1].shape
-        self.val_labels_size = self.data.val_data[:, -1].shape
-        self.test_features_size = self.data.test_data[:, :-1].shape
-        self.test_labels_size = self.data.test_data[:, -1].shape
         train_data = np.copy(self.data.train_data)
         self.orig_train_tensors = self.normalize(train_data)
+        self.train_features_size,self.train_labels_size = self.get_sizes(self.orig_train_tensors.size())
         val_data = np.copy(self.data.val_data)
         self.orig_val_tensors = self.normalize(val_data)
+        self.val_features_size,self.val_labels_size = self.get_sizes(self.orig_val_tensors.size())
         test_data = np.copy(self.data.test_data)
         self.orig_test_tensors = self.normalize(test_data)
+        self.test_features_size,self.test_labels_size = self.get_sizes(self.orig_test_tensors.size())
+        self.orig_size = self.orig_train_tensors.size(0)+self.orig_val_tensors.size(0)+self.orig_test_tensors.size(0)
 
 
     def normalize(self,data):
         for col in self.data.continuous:
-            data[:, col] = (data[:, col] - self.stats[col]['mean']) / self.stats[col]['std']
-        return data
+            data[:, col] = (data[:, col] - self.stats[col]['mean'])
+            if self.stats[col]['std'] >0:
+                data[:,col] /=self.stats[col]['std']
+        return torch.tensor(data,dtype=torch.float)
 
+    def get_sizes(self,size):
+        features = (size[0],size[1]-1)
+        labels = (size[0],1)
+        return features,labels
 
-    def masking(self, set,batch_size,device):
+    def masking(self, set,batch_size=None):
         '''
         :param set:is the masking done on the train,validation or test set.
         if the masking is done on the train set then random indices and labels of the training set will be masked,
@@ -70,6 +75,7 @@ class Preprocessing():
         '''
 
         # test features are always exposed and test target are always masked
+
         mask_test_features = np.zeros(self.test_features_size)
         mask_test_labels = np.ones(self.test_labels_size).reshape((-1, 1))
         #  validation features are always exposed
@@ -86,10 +92,10 @@ class Preprocessing():
             mask_val_labels = np.ones(self.val_labels_size).reshape((-1, 1))
             mask_val = np.concatenate((mask_val_features, mask_val_labels), axis=1)
             # the loss is calculated only on the features that have been masked out, not on the randomized features
-            train_loss_indices = mask_train == 1
+            train_loss_indices = torch.tensor(mask_train == 1)
             # loss is calculated only on the train set. so the loss indices of the validation and test set are 0.
-            val_loss_indices = np.zeros(mask_val.shape)
-            test_loss_indices = np.zeros(mask_test.shape)
+            val_loss_indices = torch.zeros(mask_val.shape)
+            test_loss_indices = torch.zeros(mask_test.shape)
         elif set == 'val':
             # the train features and labels are exposed
             mask_train_features = np.zeros(self.train_features_size)
@@ -99,9 +105,9 @@ class Preprocessing():
             mask_val_labels = np.ones(self.val_labels_size).reshape((-1, 1))
             mask_val = np.concatenate((mask_val_features, mask_val_labels), axis=1)
             # loss indices are calculated just on the validation set
-            train_loss_indices = np.zeros(mask_train.shape)
-            val_loss_indices = mask_val.copy()
-            test_loss_indices = np.zeros(mask_test.shape)
+            train_loss_indices = torch.zeros(mask_train.shape)
+            val_loss_indices = torch.tensor(mask_val.copy())
+            test_loss_indices = torch.zeros(mask_test.shape)
         else:
             # the train features and labels are exposed
             mask_train_features = np.zeros(self.train_features_size)
@@ -110,15 +116,15 @@ class Preprocessing():
             # validation set targets are exposed
             mask_val_labels = np.zeros(self.val_labels_size).reshape((-1, 1))
             mask_val = np.concatenate((mask_val_features, mask_val_labels), axis=1)
-            train_loss_indices = np.zeros(mask_train.shape)
-            val_loss_indices = np.zeros(mask_val.shape)
-            test_loss_indices = mask_test.copy()
+            train_loss_indices = torch.zeros(mask_train.shape)
+            val_loss_indices = torch.zeros(mask_val.shape)
+            test_loss_indices = torch.tensor(mask_test.copy())
         if set == 'test':
-            train_masked = self._transform_data(self.orig_train_tensors.clone(),mask_train)
+            train_masked,mask_train = self._transform_data(self.orig_train_tensors.clone(),mask_train)
             train_masked,mask_train,train_loss_indices,orig_train_tensors = self.shuffle(train_masked,mask_train,train_loss_indices,self.orig_train_tensors.clone())
-            val_masked = self._transform_data(self.orig_val_tensors.clone(),mask_val)
+            val_masked,mask_val = self._transform_data(self.orig_val_tensors.clone(),mask_val)
             val_masked,mask_val,val_loss_indices,orig_val_tensors = self.shuffle(val_masked,mask_val,val_loss_indices,self.orig_val_tensors.clone())
-            test_masked = self._transform_data(self.orig_test_tensors.clone(),mask_test)
+            test_masked,mask_test = self._transform_data(self.orig_test_tensors.clone(),mask_test)
             test_masked,mask_test,test_loss_indices,orig_test_tensors = self.shuffle(test_masked,mask_test,test_loss_indices,self.orig_test_tensors.clone())
             train_indexes,val_indexes,test_indexes = self.define_mini_batches(len(train_masked),len(val_masked),len(test_masked),batch_size,self.split)
             batches = []
@@ -131,19 +137,21 @@ class Preprocessing():
             return batches
         else:
             mask = torch.tensor(np.concatenate((mask_train, mask_val, mask_test), axis=0))
-            loss_indices = torch.tensor(np.concatenate((train_loss_indices, val_loss_indices, test_loss_indices), axis=0))
-            data = torch.cat((self.orig_train_tensors,self.orig_val_tensors,self.orig_test_tensors),dim=0)
-            masked_data, mask = self._transform_data(data,mask)
+            loss_indices = torch.cat((train_loss_indices, val_loss_indices, test_loss_indices), dim = 0)
+            data = torch.cat((self.orig_train_tensors,self.orig_val_tensors,self.orig_test_tensors),dim = 0).clone()
+            masked_data, mask = self._transform_data(data.clone(),mask)
             return self.shuffle(masked_data, mask, loss_indices, data)
+
     def construct_batches(self,indexes,data):
         batch = []
         for index,data in zip(indexes,data):
             batch.append(data[index])
         return torch.cat(batch)
+
     def define_mini_batches(self,train,val,test,final_batch_size,split):
-        train_batch_size = int(final_batch_size * split['train'])
-        val_batch_size = int(final_batch_size * split['val'])
-        test_batch_size = int(final_batch_size * split['test'])
+        train_batch_size = math.ceil(final_batch_size * split['train'])
+        val_batch_size = math.ceil(final_batch_size * split['val'])
+        test_batch_size = math.ceil(final_batch_size * split['test'])
         train_indexes = list(range(train))
         val_indexes = list(range(val))
         test_indexes = list(range(test))

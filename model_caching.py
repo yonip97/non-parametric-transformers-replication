@@ -17,11 +17,12 @@ class Model_Cacher():
         if self.min_val_loss > val_loss:
             self.improvements_since_last_caching +=1
             print("Improvement in  the model")
+            self.min_val_loss = val_loss
             if self.improvements_since_last_caching >= self.improvements_necessary:
                 return True
         return False
 
-    def cache(self,model,val_loss,epoch):
+    def cache(self,model,epoch):
         print("Deleting previous weights")
         path = os.path.join(self.caching_path,'*')
         files = glob.glob(path)
@@ -31,7 +32,6 @@ class Model_Cacher():
         path = os.path.join(self.caching_path,str(epoch)+'.pt')
         self.best_model = path
         torch.save(model.state_dict(), path)
-        self.min_val_loss = val_loss
         self.improvements_since_last_caching = 0
 
     def load_model(self,model):

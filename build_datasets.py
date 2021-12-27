@@ -11,56 +11,83 @@ from sklearn.model_selection import KFold
 from util import probs
 from sklearn.preprocessing import StandardScaler
 from sklearn.preprocessing import OneHotEncoder
+from sklearn.datasets import fetch_openml
 
 
 class base_dataset():
-    def _cutoff(self,df, cont_features):
+    def _cutoff(self, df, num_of_cont_features,fixed_test = None):
+        '''
+        :param df: pandas dataframe containing the data
+        :param num_of_cont_features: number of continuous features. If -1 then all are continuous.
+        The function is based on the fact that continuous features will have more unique values.
+        It defines the continuous features as the features with the most unique features. The rest are categorical
+        '''
         df= df.dropna()
         new_cols = {col: new_col for col, new_col in zip(df.columns, range(len(df.columns) + 1))}
         df = df.rename(columns=new_cols)
-        #df = df.replace({np.nan: None})
-        #df = df[df.iloc[:, -1].notnull()]
         unique_values = df.nunique()
-        if cont_features != -1:
-            continuous = unique_values.nlargest(cont_features)
+        if num_of_cont_features != -1:
+            continuous = unique_values.nlargest(num_of_cont_features)
             self.categorical = unique_values.drop(labels=continuous.index).to_dict()
             self.continuous = continuous.index.tolist()
             df[list(self.categorical.keys())] = df[self.categorical.keys()].astype('category')
             df[list(self.categorical.keys())] = df[self.categorical.keys()].apply(lambda x: x.cat.codes)
-         #   df[list(self.categorical.keys())] = df[list(self.categorical.keys())].replace(to_replace=-1, value=np.nan)
         else:
             self.categorical = {}
             self.continuous = list(df.columns)
-        #data = df.to_numpy(dtype=np.float)
-        #data = np.where(np.isnan(data), None, data)
-        self._create_sets(df.to_numpy(dtype=np.float))
+        if fixed_test is None:
+            self._create_sets(df.to_numpy(dtype=np.float))
+        else:
+            fixed_test[list(self.categorical.keys())] = fixed_test[self.categorical.keys()].astype('category')
+            fixed_test[list(self.categorical.keys())] = fixed_test[self.categorical.keys()].apply(lambda x: x.cat.codes)
+            self._fixed_sets(df.to_numpy(dtype=np.float),fixed_test.to_numpy(dtype = np.float))
 
-    def _manual_preprocessing(self, df,categorical_cols,continuous_cols):
+    def _manual_preprocessing(self, df,categorical_cols,continuous_cols,fixed_test = None):
+        '''
+        :param df: pandas dataframe containing the data.
+        :param categorical_cols: Columns index of categorical features.
+        :param continuous_cols: Columns index of continuous features.
+        '''
         df = df.dropna()
         new_cols = {col: new_col for col, new_col in zip(df.columns, range(len(df.columns) + 1))}
         df = df.rename(columns=new_cols)
-        #df = df.replace({np.nan: None})
-        #df = df[df.iloc[:,-1].notnull()]
         self.categorical = df[categorical_cols].nunique().to_dict()
         self.continuous = continuous_cols
         df[categorical_cols] = df[categorical_cols].astype('category')
         df[categorical_cols] = df[categorical_cols].apply(lambda x:x.cat.codes)
-        #df[categorical_cols] = df[categorical_cols].replace(to_replace = -1,value = np.nan)
-        #data = df.to_numpy(dtype = np.float)
-        #data = np.where(np.isnan(data), None, data)
-        self._create_sets(df.to_numpy(dtype=np.float))
+        if fixed_test is None:
+            self._create_sets(df.to_numpy(dtype=np.float))
+        else:
+            fixed_test[categorical_cols] = fixed_test[categorical_cols].astype('category')
+            fixed_test[categorical_cols] = fixed_test[categorical_cols].apply(lambda x: x.cat.codes)
+            self._fixed_sets(df.to_numpy(dtype=np.float),fixed_test)
 
     def _create_sets(self,data):
+        '''
+        splits data to training, validation and testing
+        '''
         train_val_data, self.test_data = train_test_split(data, test_size=self.split['test'])
         self.train_data,self.val_data = train_test_split(train_val_data,train_size=self.split['train']/(self.split['train']+self.split['val']))
 
+    def _fixed_sets(self,train_val_data,test_data):
+        self.test_data = test_data
+        self.train_data, self.val_data = train_test_split(train_val_data, train_size=self.split['train'] / (
+                    self.split['train'] + self.split['val']))
+
     def _cv_split(self,cv):
+        '''
+        :param cv: number of cross validations
+        In case of cross validation, creates generator for the cross validation from the training and validation sets.
+        '''
         self.orig_train_val_data = np.concatenate((self.train_data,self.val_data))
         self.cv = cv
         splitter = KFold(n_splits=cv)
         self.generator = splitter.split(self.orig_train_val_data)
 
     def next(self):
+        '''
+        Resplits data for cross validation
+        '''
         train_indices, val_indices = next(self.generator)
         self.val_data = self.orig_train_val_data[val_indices]
         self.train_data = self.orig_train_val_data[train_indices]
@@ -69,69 +96,6 @@ class base_dataset():
 
 
 
-    # def create_training_mask(self):
-    #     '''
-    #     unchanged value get mask value of 0.
-    #     masked out value of 1
-    #     randomized value of 2
-    #     :return:
-    #     '''
-    #     features = np.copy(self.train_data[:,:-1])
-    #     labels = np.copy(self.train_data[:,-1])
-    #     flat_features = features.flatten()
-    #     feature_mask = np.full(flat_features.shape,1)
-    #     mask_features = np.random.choice(a=[0,1,2], size=np.count_nonzero(~np.isnan(flat_features)),
-    #                                     p=[self.p.f_uc,self.p.f_mo, self.p.f_r])
-    #     feature_mask[~np.isnan(flat_features)] = mask_features
-    #     feature_mask = feature_mask.reshape(features.shape)
-    #     flat_labels = labels.flatten()
-    #     labels_mask = np.full(flat_labels.shape,1)
-    #     mask_labels = np.random.choice(a=[0,1], size=np.count_nonzero(~np.isnan(flat_labels)),
-    #                                    p=[self.p.l_uc,self.p.l_mo])
-    #     labels_mask[~np.isnan(flat_labels)] = mask_labels
-    #     labels_mask = labels_mask.reshape(labels.shape)
-    #     features[feature_mask == 1] = 0
-    #     feature_indices = feature_mask == 2
-    #     if self.target_type == 'categorical':
-    #         labels_classes = self.categorical.pop(self.target_col, None)
-    #     else:
-    #         self.continuous.remove(self.target_col)
-    #     for category in self.continuous:
-    #         arr_size = np.count_nonzero(feature_indices[:, category] == True)
-    #         features[feature_indices[:, category], category] = np.random.normal(0, 1, arr_size)
-    #     for category, classes in self.categorical.items():
-    #         arr_size = np.count_nonzero(feature_indices[:, category] == True)
-    #         features[feature_indices[:, category], category] = np.random.randint(low=0, high=classes, size=arr_size)
-    #     labels[labels_mask == 1] = 0
-    #     if self.target_type == 'categorical':
-    #         self.categorical[self.target_col] = labels_classes
-    #     else:
-    #         self.continuous.append(self.target_col)
-    #     X = np.hstack((features, labels.reshape((-1, 1))))
-    #     mask = np.hstack((feature_mask, labels_mask.reshape((-1, 1))))
-    #     M = mask == 1
-    #     return torch.tensor(X,dtype=torch.float), torch.tensor(M,dtype=torch.float)
-    #
-    #
-    # def mask_targets(self,set):
-    #     val_data = np.copy(self.val_data)
-    #     val_M = np.zeros(self.val_data.shape)
-    #     train_data = np.copy(self.train_data)
-    #     train_M = np.zeros(self.train_data.shape)
-    #     if set == 'val':
-    #         val_data[:,-1] = 0
-    #         val_M[:,-1] = 1
-    #         X = np.concatenate((train_data,val_data))
-    #         M = np.concatenate((train_M,val_M))
-    #     else:
-    #         test_data = np.copy(self.test_data)
-    #         test_M = np.zeros(self.test_data.shape)
-    #         test_data[:,-1] = 0
-    #         test_M[:,-1] = 1
-    #         X = np.concatenate((train_data,val_data,test_data))
-    #         M = np.concatenate((train_M,val_M,test_M))
-    #     return torch.tensor(X,dtype=torch.float), torch.tensor(M,dtype=torch.float)
-    #
 
 
 class income_dataset(base_dataset):
@@ -303,5 +267,32 @@ class yacht_dataset(base_dataset):
             self._cv_split(cv)
 
 
+
+
+class MNIST(base_dataset):
+    def __init__(self,embedding_dim = 64,cv = None,n_patches = 49):
+        x, y = fetch_openml(
+            'mnist_784', version=1, return_X_y=True,cache=False)
+        self.fixed_test_index = 10000
+        y = y.astype(int)
+        test_x = x[:self.fixed_test_index]
+        test_y = y[:self.fixed_test_index]
+        train_x = x[self.fixed_test_index:]
+        train_y = y[self.fixed_test_index:]
+        train_data = np.concatenate((train_x,train_y.reshape(-1,1)),axis=1)
+        test_data = np.concatenate((test_x,test_y.reshape(-1,1)),axis=1)
+        test_prop = len(test_data)/len(train_data)+len(test_data)
+        self.orig_dim = train_data.shape[1]
+        self.split = {'train':0.9*(1-test_prop),'val':0.1*(1-test_prop),'test':test_prop}
+        self.categorical = {self.orig_dim-1:10}
+        self.continuous = [i for i in range(self.orig_dim-1)]
+        self._fixed_sets(train_data,test_data)
+        self.embedding_dim = embedding_dim
+        self.input_dim = embedding_dim*(n_patches+1)
+        self.target_col = 784
+        self.image_channels = 1
+        self.n_classes = 10
+        self.target_type = 'categorical'
+        self.name = 'mnist'
 
 
