@@ -1,16 +1,8 @@
-import time
-
-import numpy
 import numpy as np
 import pandas as pd
-import sklearn.datasets
-import torch
 from sklearn.model_selection import train_test_split
 from sklearn.datasets import load_boston,load_breast_cancer
 from sklearn.model_selection import KFold
-from util import probs
-from sklearn.preprocessing import StandardScaler
-from sklearn.preprocessing import OneHotEncoder
 from sklearn.datasets import fetch_openml
 
 

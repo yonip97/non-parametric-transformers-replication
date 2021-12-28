@@ -1,7 +1,4 @@
-import numpy as np
-import torch
 from sklearn.metrics import *
-from scipy.special import softmax
 import torch
 from torch.nn import NLLLoss,MSELoss,LogSoftmax
 
@@ -23,10 +20,13 @@ class nll():
 
 
 class auc_roc():
-    #TODO: finish with mask
 
-    def compute(self,pred_labels,true_labels,mask):
-        return roc_auc_score(true_labels.numpy(),pred_labels)
+    def compute(self,pred_labels,true_labels,loss_indices):
+        loss_indices= loss_indices == 1
+        pred_labels = torch.argmax(pred_labels[loss_indices],dim=1).detach().cpu().numpy()
+        true_labels = true_labels[loss_indices].detach().cpu().numpy()
+        return roc_auc_score(true_labels,pred_labels)
+
 
 class mse():
     def __init__(self):

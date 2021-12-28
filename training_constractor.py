@@ -10,9 +10,10 @@ from run_documentation import run_logger
 from util import probs
 from evaluation_metrics import *
 from scipy.stats import wilcoxon
+import numpy as np
 
 MAX_BATCH_SIZE = 1024
-evaluation_metrics_dict = {'acc': acc, 'nll': nll, 'rmse': rmse, 'mse': mse}
+evaluation_metrics_dict = {'acc': acc, 'nll': nll, 'rmse': rmse, 'mse': mse,'auc-roc':auc_roc}
 
 
 class Trainer():
@@ -81,9 +82,9 @@ class Trainer():
         if experiment == 'duplicate':
             self.run_training(data, batch_size, cv, True,loading_paths)
         elif experiment == 'corruption':
-            self.corruption_experiment(data, batch_size, cv,loading_paths)
+            self.corruption_experiment(data, batch_size,loading_paths)
         elif experiment == 'deletion':
-            self.run_deletion(data, batch_size, cv,loading_paths)
+            self.deletion_experiment(data, batch_size, cv,loading_paths)
 
 
     def run_training(self, data, batch_size, cv=None, duplicate=False,loading_paths = None):
@@ -277,9 +278,6 @@ class Trainer():
                     eval_loss_dict = self.pass_through(batch_X, batch_M, batch_loss_indices, batch_real_data)
                     eval_loss += eval_loss_dict['loss']
                     eval_num += eval_loss_dict['predictions']
-                eval_loss = self.pass_through(X_val_modified.to(self.device), M_val_modified.to(self.device),
-                                              val_loss_indices_modified.to(self.device),
-                                              orig_data_modified.to(self.device))
                 eval_loss /= eval_num
                 self.run_logger.check_improvement(self.model, eval_loss, epoch)
                 if epoch % self.print_epochs == 0:
@@ -332,14 +330,15 @@ class Trainer():
         real_data_modified = torch.cat((real_data, real_data), 0)
         return X_modified, M_modified, loss_indices_modified, real_data_modified
 
-    def corruption_experiment(self, encoded_data, batch_size, cv=None):
-        self.run_training(encoded_data, batch_size, cv)
+    def corruption_experiment(self, data, batch_size, load_path):
+        self.run_training(data, batch_size, loading_paths=load_path)
+        encoded_data = Preprocessing(data,self.p)
         evaluation_metrics_results = {}
         for eval_metric, _ in self.eval_metrics.items():
             evaluation_metrics_results[eval_metric] = {}
             evaluation_metrics_results[eval_metric]['loss'] = 0
             evaluation_metrics_results[eval_metric]['counter'] = 0
-        full_set = np.concatenate((encoded_data.data.train_data, encoded_data.data.val_data, encoded_data.data.test_data), axis=0)
+        full_set = np.concatenate((data.train_data, data.val_data, data.test_data), axis=0)
         full_data = utils_data.TensorDataset(torch.tensor(full_set, requires_grad=False, dtype=torch.float))
         data_loader = utils_data.DataLoader(full_data, batch_size=batch_size, shuffle=True)
         for batch_data in data_loader:
@@ -347,12 +346,12 @@ class Trainer():
             for i in range(len(batch_data)):
                 permuted_X, M,label_loss_indices, real_label = permute(batch_data, i)
                 z = self.model.forward(permuted_X,M)
-                pred = z[encoded_data.data.target_col].detach().cpu()
-                if encoded_data.data.target_type == 'continuous':
-                    pred *= encoded_data.stats[encoded_data.data.target_col]['std']
-                    pred += encoded_data.stats[encoded_data.data.target_col]['mean']
-                    real_label *= encoded_data.stats[encoded_data.data.target_col]['std']
-                    real_label += encoded_data.stats[encoded_data.data.target_col]['mean']
+                pred = z[data.target_col].detach().cpu()
+                if data.target_type == 'continuous':
+                    pred *= encoded_data.stats[data.target_col]['std']
+                    pred += encoded_data.stats[data.target_col]['mean']
+                    real_label *= encoded_data.stats[data.target_col]['std']
+                    real_label += encoded_data.stats[data.target_col]['mean']
                 for eval_metric, eval_metric_instance in self.eval_metrics.items():
                     eval_loss = eval_metric_instance.compute(pred, real_label, label_loss_indices)
                     evaluation_metrics_results[eval_metric]['loss'] += eval_loss
@@ -366,10 +365,10 @@ class Trainer():
             results[metric] = np.array(score)
         self.calculate_and_save_results(results)
 
-    def data_deletion(self, encoded_data, batch_size, cv=None):
-        self.run_training(encoded_data, batch_size, cv)
+    def deletion_experiment(self, data, batch_size, load_path):
+        self.run_training(data, batch_size, loading_paths=load_path)
         self.model.eval()
-        full_set = np.concatenate((encoded_data.data.train_data, encoded_data.data.val_data, encoded_data.data.test_data), axis=0)
+        full_set = np.concatenate((data.train_data, data.val_data, data.test_data), axis=0)
         full_data = torch.tensor(full_set, dtype=torch.float)
         max_change = 0.1
         max_change_per_delete = 0.01
@@ -380,13 +379,13 @@ class Trainer():
         for i in range(len(full_set)):
             M = torch.zeros(full_data.size())
             M[i,-1] = 1
-            X_TT = full_data.clone()
-            if encoded_data.data.target_type == 'categorical':
-                X_TT[i,-1] = -1
+            X_i_masked = full_data.clone()
+            if data.target_type == 'categorical':
+                X_i_masked[i,-1] = -1
             else:
-                X_TT[i,-1] = 0
-            row_tested = X_TT[i,-1]
-            full_data_prediction = self.model.forward(X_TT,M)[i,-1]
+                X_i_masked[i,-1] = 0
+            row_tested = X_i_masked[i,-1]
+            full_data_prediction = self.model.forward(X_i_masked,M)[i,-1]
             R = np.concatenate((np.arange(0, i), np.arange(i + 1, len(full_set))))
             while True:
                 deleted_index = np.random.randint(low=0, high=len(R))
