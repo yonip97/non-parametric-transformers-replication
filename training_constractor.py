@@ -84,7 +84,7 @@ class Trainer():
         elif experiment == 'corruption':
             self.corruption_experiment(data, batch_size,loading_paths)
         elif experiment == 'deletion':
-            self.deletion_experiment(data, batch_size, cv,loading_paths)
+            self.deletion_experiment(data, batch_size,loading_paths)
 
 
     def run_training(self, data, batch_size, cv=None, duplicate=False,loading_paths = None):
@@ -302,6 +302,7 @@ class Trainer():
         self.model.eval()
         with torch.no_grad():
             for batch_data in batches:
+                batch_data = [item.to(self.device) for item in batch_data]
                 X_batch_modified, M_batch_modified, batch_loss_indices_modified, orig_data_batch_modified = self.duplicate(batch_data)
                 batch_true_labels = orig_data_batch_modified[:, -1]
                 z = self.model.forward(X_batch_modified.to(self.device), M_batch_modified.to(self.device))
@@ -384,17 +385,19 @@ class Trainer():
                 X_i_masked[i,-1] = -1
             else:
                 X_i_masked[i,-1] = 0
-            row_tested = X_i_masked[i,-1]
-            full_data_prediction = self.model.forward(X_i_masked,M)[i,-1]
+            row_tested = X_i_masked[i]
+            full_data_prediction = self.model.forward(X_i_masked.to(self.device),M.to(self.device))[data.target_col][i].item()
+
             R = np.concatenate((np.arange(0, i), np.arange(i + 1, len(full_set))))
             while True:
                 deleted_index = np.random.randint(low=0, high=len(R))
                 new_R = np.delete(R, deleted_index)
+
                 selected_rows = full_data[torch.tensor(new_R).long()]
-                X = torch.cat((selected_rows, row_tested), dim=0)
+                X = torch.cat((selected_rows, row_tested.unsqueeze(dim=0)), dim=0)
                 M = torch.zeros(X.size())
                 M[-1, -1] = 1
-                y_proposed = self.model.forward(X.to(self.device), M.to(self.device))[-1, -1].item()
+                y_proposed = self.model.forward(X.to(self.device), M.to(self.device))[data.target_col][-1].item()
                 delta_proposal = abs((y_proposed - full_data_prediction) / full_data_prediction)
                 if delta_proposal < max_change_per_delete:
                     if delta_proposal < max_change:

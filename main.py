@@ -45,7 +45,7 @@ def main(args):
 
 def build_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset',type=str,default='breast_cancer')
+    parser.add_argument('--dataset',type=str,default='yacht')
     parser.add_argument('--amount_of_seeds',type=int,default=1)
     parser.add_argument('--seeds',type = str, default=None)
     parser.add_argument('--lr',type=float,default=5e-4)
@@ -61,7 +61,7 @@ def build_parser():
     parser.add_argument('--features_mask_prob',type=float,default=0.15)
     parser.add_argument('--init_tradeoff',type=float,default=1)
     parser.add_argument('--batch_size',type=int,default=-1)
-    parser.add_argument('--evaluation_metrics',type=str,default='auc-roc')
+    parser.add_argument('--evaluation_metrics',type=str,default='rmse')
     parser.add_argument('--device',type=str,default='cuda:2')
     parser.add_argument('--warmup',type=float,default=0.5)
     parser.add_argument('--cv',type=int,default=None)
@@ -71,7 +71,7 @@ def build_parser():
     parser.add_argument('--print_every_n_th_epoch',type=int,default=1)
     parser.add_argument('--lr_scheduler',type=str,default='flat_then_anneal')
     parser.add_argument('--tradeoff_scheduler',type=str,default='cosine')
-    parser.add_argument('--experiment',type=str,default=None)
+    parser.add_argument('--experiment',type=str,default='deletion')
     parser.add_argument('--use_image_patcher',type=bool,default=False)
     parser.add_argument('--image_n_patches',type = int,default=49)
     parser.add_argument('--model_image_n_channels',type= int,default=1)
