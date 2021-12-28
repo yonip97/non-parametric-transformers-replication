@@ -1,8 +1,3 @@
-from npt import NPT
-from loss import Loss
-import torch
-from lamb import Lamb
-from torch import autograd
 import time
 import torch.utils.data as utils_data
 from util import permute
@@ -10,12 +5,11 @@ import math
 from npt import NPT
 from loss import Loss
 from lookahead import Lookahead
-from lamb import Lamb
 from preprocessing import Preprocessing
 from run_documentation import run_logger
 from util import probs
 from evaluation_metrics import *
-from Image_patcher import LinearImagePatcher
+from scipy.stats import wilcoxon
 
 MAX_BATCH_SIZE = 1024
 evaluation_metrics_dict = {'acc': acc, 'nll': nll, 'rmse': rmse, 'mse': mse}
@@ -81,17 +75,18 @@ class Trainer():
                 epochs = math.ceil(max_steps / steps_per_epoch)
                 return epochs, batch_size
 
-    def run(self, data, batch_size, cv=None, experiment=None):
+    def run(self, data, batch_size, cv=None, experiment=None,loading_paths = None):
         if experiment is None:
-            self.run_training(data, batch_size, cv)
+            self.run_training(data, batch_size, cv,loading_paths)
         if experiment == 'duplicate':
-            self.run_training(data, batch_size, cv, True)
+            self.run_training(data, batch_size, cv, True,loading_paths)
         elif experiment == 'corruption':
-            self.corruption_experiment(data, batch_size, cv)
+            self.corruption_experiment(data, batch_size, cv,loading_paths)
         elif experiment == 'deletion':
-            self.run_deletion(data, batch_size, cv)
+            self.run_deletion(data, batch_size, cv,loading_paths)
 
-    def run_training(self, data, batch_size, cv=None, duplicate=False):
+
+    def run_training(self, data, batch_size, cv=None, duplicate=False,loading_paths = None):
         results = {}
         if cv == None:
             self.run_logger.define_cacher(improvements_necessary=self.cacher_improvements_necessary)
@@ -101,11 +96,16 @@ class Trainer():
             self.build_npt(encoded_data)
             self.build_optimizer()
             self.build_loss_function(encoded_data)
+            if loading_paths is not None:
+                self.load_from_save(loading_paths[0])
+            else:
+                if duplicate:
+                    self.duplicate_experiment(encoded_data, epochs, run_batch_size)
+                else:
+                    self.train(encoded_data, epochs, run_batch_size)
             if duplicate:
-                self.duplicate_experiment(encoded_data, epochs, run_batch_size)
                 run_results = self.test_duplicate(encoded_data,run_batch_size)
             else:
-                self.train(encoded_data, epochs, run_batch_size)
                 run_results = self.test(encoded_data,run_batch_size)
             for metric, score in run_results.items():
                 print(f"The {metric} loss on the test set is {score:.4f}")
@@ -121,11 +121,15 @@ class Trainer():
                 self.build_npt(encoded_data)
                 self.build_optimizer()
                 self.build_loss_function(encoded_data)
+                if loading_paths is not None:
+                    self.load_from_save(loading_paths[i-1])
                 if duplicate:
                     self.duplicate_experiment(encoded_data, epochs, run_batch_size)
-                    run_result = self.test(encoded_data,batch_size)
                 else:
                     self.train(encoded_data, epochs, run_batch_size)
+                if duplicate:
+                    run_result = self.test_duplicate(encoded_data,batch_size)
+                else:
                     run_result = self.test(encoded_data,batch_size)
                 for metric, score in run_result.items():
                     print(f"The {metric} loss on the test set is {score:.4f}")
@@ -242,6 +246,9 @@ class Trainer():
         self.model.train()
         return evaluation_metrics_results
 
+    def load_from_save(self,path):
+        self.model.load_state_dict(torch.load(path))
+
     def duplicate_experiment(self, encoded_data, epochs, batch_size):
         start = time.time()
         for epoch in range(1, epochs + 1):
@@ -261,9 +268,19 @@ class Trainer():
                 data_tuple = [item.to(self.device) for item in encoded_data.masking('val')]
                 X_val_modified, M_val_modified, val_loss_indices_modified, orig_data_modified = self.duplicate(
                     data_tuple)
+                validation = utils_data.TensorDataset(X_val_modified, M_val_modified,val_loss_indices_modified,orig_data_modified)
+                validation_loader = utils_data.DataLoader(validation, batch_size=batch_size, shuffle=False)
+                eval_loss = 0
+                eval_num = 0
+                for batch_data in validation_loader:
+                    batch_X, batch_M, batch_loss_indices, batch_real_data = batch_data
+                    eval_loss_dict = self.pass_through(batch_X, batch_M, batch_loss_indices, batch_real_data)
+                    eval_loss += eval_loss_dict['loss']
+                    eval_num += eval_loss_dict['predictions']
                 eval_loss = self.pass_through(X_val_modified.to(self.device), M_val_modified.to(self.device),
                                               val_loss_indices_modified.to(self.device),
                                               orig_data_modified.to(self.device))
+                eval_loss /= eval_num
                 self.run_logger.check_improvement(self.model, eval_loss, epoch)
                 if epoch % self.print_epochs == 0:
                     print(f"Time for {self.eval_epochs} epochs is {time.time() - start:.3f} seconds")
@@ -275,25 +292,34 @@ class Trainer():
             self.optimizer.zero_grad()
             self.batches_per_epoch = 0
 
-    def test_duplicate(self, data):
+
+    def test_duplicate(self, encoded_data,batch_size):
         evaluation_metrics_results = {}
+        for eval_metric, _ in self.eval_metrics.items():
+            evaluation_metrics_results[eval_metric] = {}
+            evaluation_metrics_results[eval_metric]['loss'] = 0
+            evaluation_metrics_results[eval_metric]['counter'] = 0
         self.run_logger.load_model(self.model)
-        data_tuple = [item.to(self.device) for item in data.masking('test')]
-        X_test_modified, M_test_modified, test_loss_indices_modified, orig_data_modified = self.duplicate(data_tuple)
-        true_labels = orig_data_modified[:, -1].detach().cpu()
+        batches = encoded_data.masking('test', batch_size)
         self.model.eval()
         with torch.no_grad():
-            z = self.model.forward(X_test_modified.to(self.device), M_test_modified.to(self.device))
-            pred = z[data.target_col].detach().cpu()
-            if data.target_type == 'continuous':
-                pred *= data.stats[data.target_col]['std']
-                pred += data.stats[data.target_col]['mean']
-                true_labels *= data.stats[data.target_col]['std']
-                true_labels += data.stats[data.target_col]['mean']
-            for eval_metric, eval_metric_instance in self.eval_metrics.items():
-                eval_loss = eval_metric_instance.compute(pred, true_labels,
-                                                         test_loss_indices_modified[:, -1].detach().cpu())
-                evaluation_metrics_results[eval_metric] = eval_loss
+            for batch_data in batches:
+                X_batch_modified, M_batch_modified, batch_loss_indices_modified, orig_data_batch_modified = self.duplicate(batch_data)
+                batch_true_labels = orig_data_batch_modified[:, -1]
+                z = self.model.forward(X_batch_modified.to(self.device), M_batch_modified.to(self.device))
+                pred = z[encoded_data.data.target_col].detach().cpu()
+                if encoded_data.data.target_type == 'continuous':
+                    pred *= encoded_data.stats[encoded_data.data.target_col]['std']
+                    pred += encoded_data.stats[encoded_data.data.target_col]['mean']
+                    batch_true_labels *= encoded_data.stats[encoded_data.data.target_col]['std']
+                    batch_true_labels += encoded_data.stats[encoded_data.data.target_col]['mean']
+                for eval_metric, eval_metric_instance in self.eval_metrics.items():
+                    eval_loss = eval_metric_instance.compute(pred, batch_true_labels, batch_loss_indices_modified[:, -1])
+                    evaluation_metrics_results[eval_metric]['loss'] += eval_loss
+                    evaluation_metrics_results[eval_metric]['counter'] += batch_loss_indices_modified[:, -1].sum().item()
+        for eval_metric in self.eval_metrics.keys():
+            evaluation_metrics_results[eval_metric]['loss'] /= evaluation_metrics_results[eval_metric]['counter']
+            evaluation_metrics_results[eval_metric] = evaluation_metrics_results[eval_metric]['loss']
         self.model.train()
         return evaluation_metrics_results
 
@@ -306,45 +332,71 @@ class Trainer():
         real_data_modified = torch.cat((real_data, real_data), 0)
         return X_modified, M_modified, loss_indices_modified, real_data_modified
 
-    def corruption_experiment(self, data, batch_size, cv=None):
-        self.run_training(data, batch_size, cv)
-        full_set = np.concatenate((data.train_data, data.val_data, data.test_data), axis=0)
+    def corruption_experiment(self, encoded_data, batch_size, cv=None):
+        self.run_training(encoded_data, batch_size, cv)
+        evaluation_metrics_results = {}
+        for eval_metric, _ in self.eval_metrics.items():
+            evaluation_metrics_results[eval_metric] = {}
+            evaluation_metrics_results[eval_metric]['loss'] = 0
+            evaluation_metrics_results[eval_metric]['counter'] = 0
+        full_set = np.concatenate((encoded_data.data.train_data, encoded_data.data.val_data, encoded_data.data.test_data), axis=0)
         full_data = utils_data.TensorDataset(torch.tensor(full_set, requires_grad=False, dtype=torch.float))
         data_loader = utils_data.DataLoader(full_data, batch_size=batch_size, shuffle=True)
         for batch_data in data_loader:
             batch_data = batch_data[0]
             for i in range(len(batch_data)):
-                permuted_X, M, real_label = permute(batch_data, i)
-                scores = self.evaluate(data, permuted_X, M, real_label)
-                for metric, score in scores.items():
-                    print(f"The {metric} loss of the sample is {score}")
+                permuted_X, M,label_loss_indices, real_label = permute(batch_data, i)
+                z = self.model.forward(permuted_X,M)
+                pred = z[encoded_data.data.target_col].detach().cpu()
+                if encoded_data.data.target_type == 'continuous':
+                    pred *= encoded_data.stats[encoded_data.data.target_col]['std']
+                    pred += encoded_data.stats[encoded_data.data.target_col]['mean']
+                    real_label *= encoded_data.stats[encoded_data.data.target_col]['std']
+                    real_label += encoded_data.stats[encoded_data.data.target_col]['mean']
+                for eval_metric, eval_metric_instance in self.eval_metrics.items():
+                    eval_loss = eval_metric_instance.compute(pred, real_label, label_loss_indices)
+                    evaluation_metrics_results[eval_metric]['loss'] += eval_loss
+                    evaluation_metrics_results[eval_metric]['counter'] += label_loss_indices.sum().item()
+        for eval_metric in self.eval_metrics.keys():
+            evaluation_metrics_results[eval_metric]['loss'] /= evaluation_metrics_results[eval_metric]['counter']
+            evaluation_metrics_results[eval_metric] = evaluation_metrics_results[eval_metric]['loss']
+        self.model.train()
+        results = {}
+        for metric, score in evaluation_metrics_results.items():
+            results[metric] = np.array(score)
+        self.calculate_and_save_results(results)
 
-    def data_deletion(self, data, batch_size, cv=None):
-        self.run_training(data, batch_size, cv)
+    def data_deletion(self, encoded_data, batch_size, cv=None):
+        self.run_training(encoded_data, batch_size, cv)
         self.model.eval()
-        full_set = np.concatenate((data.train_data, data.val_data, data.test_data), axis=0)
+        full_set = np.concatenate((encoded_data.data.train_data, encoded_data.data.val_data, encoded_data.data.test_data), axis=0)
         full_data = torch.tensor(full_set, dtype=torch.float)
         max_change = 0.1
         max_change_per_delete = 0.01
         N_max_retry = 50
         eps = 0.02
         N_retry = 0
-        result_dict = {}
+        result_dict = {'kept':[],'thrown':[]}
         for i in range(len(full_set)):
-            y = full_data[i]
-            true_label = y[-1].item()
-            y_masked = y.reshape(1, -1)
-            y_masked[:, -1] = 0
-            R = np.concatenate((np.arange(0, i), np.arange(i + 1, len(full_data))))
+            M = torch.zeros(full_data.size())
+            M[i,-1] = 1
+            X_TT = full_data.clone()
+            if encoded_data.data.target_type == 'categorical':
+                X_TT[i,-1] = -1
+            else:
+                X_TT[i,-1] = 0
+            row_tested = X_TT[i,-1]
+            full_data_prediction = self.model.forward(X_TT,M)[i,-1]
+            R = np.concatenate((np.arange(0, i), np.arange(i + 1, len(full_set))))
             while True:
                 deleted_index = np.random.randint(low=0, high=len(R))
                 new_R = np.delete(R, deleted_index)
                 selected_rows = full_data[torch.tensor(new_R).long()]
-                X = torch.cat((selected_rows, y_masked), dim=0)
+                X = torch.cat((selected_rows, row_tested), dim=0)
                 M = torch.zeros(X.size())
                 M[-1, -1] = 1
                 y_proposed = self.model.forward(X.to(self.device), M.to(self.device))[-1, -1].item()
-                delta_proposal = abs((y_proposed - true_label) / true_label)
+                delta_proposal = abs((y_proposed - full_data_prediction) / full_data_prediction)
                 if delta_proposal < max_change_per_delete:
                     if delta_proposal < max_change:
                         R = new_R
@@ -356,223 +408,13 @@ class Trainer():
                 if N_retry >= N_max_retry:
                     max_change_per_delete *= 1.1
                     N_retry = 0
-                if len(R) < eps * len(full_data):
+                if len(R) < eps * len(full_set):
                     break
-            result_dict[i] = R
-        return result_dict
+            result_dict['kept'].append(len(R))
+            result_dict['thrown'].append(len(full_set)-len(R))
+        self.run_logger.create_results_file()
+        wilcoxon_results = wilcoxon(result_dict['kept'], result_dict['thrown'])
+        printable_results = f'''Wilcoxon test statistic is {wilcoxon_results[0]} and the p value is {wilcoxon_results[1]}'''
+        print(printable_results)
+        self.run_logger.save_run_metric_results(printable_results)
 
-# def data_corruption(data, model, epochs, optimizer, batch_size, loss_function, eval_metric, eval_each_n_epochs,
-#                     switch_to_pred=False, clip=None, use_lr_scheduler=False, use_tradeoff_scheduler=False):
-#     train_model(data, model, epochs, optimizer, batch_size, loss_function, eval_metric, eval_each_n_epochs,
-#                 switch_to_pred, clip, use_lr_scheduler, use_tradeoff_scheduler)
-#     device = 'cpu'
-#     if torch.cuda.is_available():
-#         device = 'cuda'
-#     full_set = np.concatenate((data.train_data, data.val_data, data.test_data), axis=0)
-#     full_data = utils_data.TensorDataset(torch.tensor(full_set, requires_grad=False, dtype=torch.float))
-#     data_loader = utils_data.DataLoader(full_data, batch_size=batch_size, shuffle=True)
-#     for batch_data in data_loader:
-#         batch_data = batch_data[0]
-#         for i in range(len(batch_data)):
-#             permuted_X, M, real_label = permute(batch_data, i)
-#             if switch_to_pred:
-#                 model.eval()
-#                 z = model.forward(permuted_X.to(device), M.to(device))
-#                 pred = z[-1, data.target_col].detach().cpu().view(1, -1)
-#                 score = eval_metric.compute(pred, real_label.view(1), M[-1, data.target_col].cpu())
-#                 model.train()
-#             else:
-#                 with torch.no_grad():
-#                     z = model(permuted_X.to(device), M.to(device))
-#                     pred = z[data.target_col].detach().cpu()
-#                     score = eval_metric.compute(pred[-1].view(1, -1), real_label.view(1), M[-1, data.target_col])
-#             print(f"the nll loss of the sample is {score.item()}")
-
-
-# def data_deletion(data, model, epochs, optimizer, batch_size, loss_function, eval_metric, eval_each_n_epochs,
-#                   switch_to_pred=False, clip=None, use_lr_scheduler=False, use_tradeoff_scheduler=False):
-#     train_model(data, model, epochs, optimizer, batch_size, loss_function, eval_metric, eval_each_n_epochs,
-#                 switch_to_pred, clip, use_lr_scheduler, use_tradeoff_scheduler)
-#     model.eval()
-#     device = 'cpu'
-#     if torch.cuda.is_available():
-#         device = 'cuda'
-#     full_set = np.concatenate((data.train_data, data.val_data, data.test_data), axis=0)
-#     data = torch.tensor(full_set, dtype=torch.float)
-#     max_change = 0.1
-#     max_change_per_delete = 0.01
-#     N_max_retry = 50
-#     eps = 0.02
-#     N_retry = 0
-#     for i in range(len(full_set)):
-#         y = data[i]
-#         true_label = y[-1].item()
-#         y_masked = y.reshape(1, -1)
-#         y_masked[:, -1] = 0
-#         R = np.concatenate((np.arange(0, i), np.arange(i + 1, len(data))))
-#         while True:
-#             deleted_index = np.random.randint(low=0, high=len(R))
-#             new_R = np.delete(R, deleted_index)
-#             selected_rows = data[torch.tensor(new_R).long()]
-#             X = torch.cat((selected_rows, y_masked), dim=0)
-#             M = torch.zeros(X.size())
-#             M[-1, -1] = 1
-#             y_proposed = model.forward(X.to(device), M.to(device))[-1, -1].item()
-#             delta_proposal = abs((y_proposed - true_label) / true_label)
-#             if delta_proposal < max_change_per_delete:
-#                 if delta_proposal < max_change:
-#                     R = new_R
-#                     N_retry = 0
-#                 else:
-#                     break
-#             else:
-#                 N_retry += 1
-#             if N_retry >= N_max_retry:
-#                 max_change_per_delete *= 1.1
-#                 N_retry = 0
-#             if len(R) < eps * len(data):
-#                 break
-#         return R
-
-# def train_model(data, model, epochs, optimizer, batch_size, loss_function, eval_metric, eval_each_n_epochs, clip = None, use_lr_scheduler = False, use_tradeoff_scheduler = False):
-#     device = 'cpu'
-#     if torch.cuda.is_available():
-#         device = 'cuda'
-#     start = time.time()
-#     for epoch in range(epochs):
-#         X, M = data.create_mask()
-#         train = utils_data.TensorDataset(X.to(device), M.to(device), torch.tensor(data.train_data,requires_grad=False,dtype=torch.float).to(device))
-#         train_loader = utils_data.DataLoader(train, batch_size=batch_size, shuffle=True)
-#         for batch_data in train_loader:
-#             batch_X, batch_M, batch_real_data = batch_data
-#             z = model.forward(batch_X, batch_M)
-#             batch_loss = loss_function.compute(z, batch_real_data, batch_M)
-#             batch_loss.backward()
-#             #print('Allocated:', round(torch.cuda.memory_allocated(0) / 1024 ** 3, 1), 'GB')
-#             #print(f"batch time {time.time()-start} seconds")
-#             if clip != None:
-#                 optimizer.clip_gradient(model, clip)
-#             if use_lr_scheduler:
-#                 optimizer.flat_then_anneal()
-#             if use_tradeoff_scheduler:
-#                 loss_function.Scheduler_step()
-#             optimizer.step()
-#             optimizer.zero_grad()
-#
-#         if epoch % eval_each_n_epochs == 0:
-#             model.eval()
-#             true_labels = np.concatenate((data.train_data[:, -1], data.val_data[:, -1]))
-#             eval_X, eval_M = data.mask_targets('val')
-#             z = model.forward(eval_X.to(device), eval_M.to(device))
-#             if model.finalize:
-#                 pred = z[:,-1].detach().cpu()
-#                 #eval_acc = acc.compute(pred, true_labels, eval_M[:, -1])
-#             else:
-#                 pred = z[data.target_col].detach().cpu()
-#                 #eval_acc = acc.compute(pred,true_labels,eval_M[:,-1])
-#             eval_loss = eval_metric.compute(pred, true_labels, eval_M[:, -1])
-#             model.train()
-#             print(f"Epoch {epoch} the rmse loss is {eval_loss}")
-#             print(f"100 epochs time {time.time() - start}")
-#             print(f"epoch number {epoch} and the loss is {batch_loss}")
-#             start = time.time()
-#             #print(f"Epoch {epoch} the accuracy is {eval_acc}")
-#     model.eval()
-#     X_test, M_test = data.mask_targets('test')
-#     true_labels = np.concatenate((data.train_data[:,-1],data.val_data[:,-1],data.test_data[:,-1]))
-#     z = model.forward(X_test.to(device),M_test.to(device))
-#     if model.finalize:
-#         pred = z[:,-1].detach().cpu()
-#         #acc_score = acc.compute(pred[:,-1].detach().cpu(),true_labels,M_test[:,-1])
-#     else:
-#         pred = z[data.target_col].detach().cpu()
-#     nll_score = eval_metric.compute(pred, true_labels,M_test[:,-1])
-#             #acc_score = acc.compute(pred[data.target_col].detach().cpu(), true_labels, M_test[:, -1])
-#     print(f"rmse score {nll_score}")
-#     return nll_score
-
-# def duplicate_test(data, model, epochs, optimizer, batch_size, loss_function, eval_metric, eval_each_n_epochs,
-#                    switch_to_pred=False, clip=None, cv_runs=1):
-#     device = 'cpu'
-#     if torch.cuda.is_available():
-#         device = 'cuda'
-#     for epoch in range(epochs):
-#         for run in range(cv_runs):
-#             X, M = data.create_mask('train')
-#             train = utils_data.TensorDataset(X.to(device).float(), M.to(device).float(),
-#                                              torch.tensor(data.train_data, requires_grad=False).to(device).float())
-#             train_loader = utils_data.DataLoader(train, batch_size=batch_size, shuffle=True)
-#             for batch_data in train_loader:
-#                 start = time.time()
-#                 batch_X, batch_M, batch_real_data = batch_data
-#                 batch_X_modified = torch.cat((batch_X, batch_real_data), 0)
-#                 batch_M_modified = torch.cat((batch_M, torch.zeros(batch_M.shape).to(device).float()), 0)
-#                 batch_real_data_modified = torch.cat((batch_real_data, batch_real_data), 0)
-#                 z_modified = model.forward(batch_X_modified, batch_M_modified)
-#                 loss = loss_function.forward(z_modified, batch_real_data_modified, batch_M_modified)
-#                 if loss != -1:
-#                     print('Allocated:', round(torch.cuda.memory_allocated(0) / 1024 ** 3, 1), 'GB')
-#                     loss.backward()
-#                     if clip != None:
-#                         optimizer.clip_gradient(model, clip)
-#                     optimizer.step()
-#                     optimizer.zero_grad()
-#                     print(time.time() - start)
-#                     print(f"epoch number {epoch} and the loss is {loss}")
-#         if cv_runs != 1:
-#             data.restart_splitter()
-#     if switch_to_pred:
-#         model.eval()
-#     X_test, M_test = data.mask_targets()
-#     X_test_modified = torch.cat((X_test, torch.tensor(data.test_data)), 0)
-#     M_test_modified = torch.cat((M_test, torch.zeros(M_test.shape)), 0)
-#     with torch.no_grad():
-#         pred = model.forward(X_test_modified.to(device), M_test_modified.to(device))
-#         score = eval_metric.compute(pred[:, -1].detch().cpu().numpy(), data.test_data[:, -1])
-#         print(score)
-#
-# def run_duplicate(self, data, batch_size, cv=None):
-#     if cv == None:
-#         self.run_logger.define_cacher(improvements_necessary=self.cacher_improvements_necessary)
-#         epochs, run_batch_size = self.get_epochs_and_run_batch_size(data, self.params['max_steps'], batch_size)
-#         encoded_data = Preprocessing(data, self.p)
-#         self.build_npt(encoded_data)
-#         self.build_optimizer()
-#         self.build_loss_function(encoded_data)
-#         self.train(encoded_data, epochs, run_batch_size)
-#         test_results = self.test(encoded_data)
-#         print(f"The evaluation metric loss on the test set is {test_results:.4f}")
-#         test_results = np.array(test_results)
-#     else:
-#         test_results = []
-#         for i in range(1, cv + 1):
-#             print(f"Cross validation at split {i}/{cv}")
-#             data.next()
-#             epochs, run_batch_size = self.get_epochs_and_run_batch_size(data, self.params['max_steps'], batch_size)
-#             encoded_data = Preprocessing(data, self.p)
-#             self.run_logger.define_cacher(cv=i, improvements_necessary=self.cacher_improvements_necessary)
-#             self.build_npt(encoded_data)
-#             self.build_optimizer()
-#             self.build_loss_function(encoded_data)
-#             self.train(encoded_data, epochs, run_batch_size)
-#             test_eval = self.test(encoded_data)
-#             print(f"The evaluation metric loss on the test set is {test_eval:.4f}")
-#             test_results.append(test_eval)
-#         test_results = np.array(test_results)
-#     self.calculate_and_save_results(test_results)
-# def evaluate(self, data, eval_X, eval_M, true_labels):
-#     evaluation_metrics_results = {}
-#     self.model.eval()
-#     with torch.no_grad():
-#         z = self.model.forward(eval_X.to(self.device), eval_M.to(self.device))
-#         pred = z[data.target_col].detach().cpu()
-#         if data.target_type == 'continuous':
-#             pred *= data.stats[data.target_col]['std']
-#             pred += data.stats[data.target_col]['mean']
-#             true_labels *= data.stats[data.target_col]['std']
-#             true_labels += data.stats[data.target_col]['mean']
-#         for eval_metric in self.eval_metric:
-#             eval_loss = evaluation_metrics_dict[eval_metric].compute(pred, true_labels, eval_M[:, -1])
-#             evaluation_metrics_results[eval_metric] = eval_loss
-#     self.model.train()
-#     return evaluation_metrics_results

@@ -35,25 +35,29 @@ def main(args):
         params_dict = vars(args)
         evaluation_metrics = [item for item in args.evaluation_metrics.split(',')]
         params_dict['evaluation_metrics'] = evaluation_metrics
+        if args.models_paths is not None:
+            loading_paths = [item for item in args.models_paths.split(',')]
+        else:
+            loading_paths = None
         trainer = Trainer(params_dict=params_dict,data=data,device=device,experiment=args.experiment)
-        trainer.run(data,batch_size,cv,experiment=args.experiment)
+        trainer.run(data, batch_size, cv, experiment=args.experiment,loading_paths=loading_paths)
 
 
 def build_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset',type=str,default='breast_cancer')
+    parser.add_argument('--dataset',type=str,default='mnist')
     parser.add_argument('--amount_of_seeds',type=int,default=1)
     parser.add_argument('--seeds',type = str, default=None)
     parser.add_argument('--lr',type=float,default=1e-3)
     parser.add_argument('--end_lr',type = float,default=1e-7)
     parser.add_argument('--power',type = float,default=1)
-    parser.add_argument('--max_steps',type = int,default=800000)
+    parser.add_argument('--max_steps',type = int,default=500000)
     parser.add_argument('--embedding_dim',type=int, default=16)
     parser.add_argument('--model_layers',type = int,default=4)
     parser.add_argument('--heads',type=int,default=8)
     parser.add_argument('--rff_layers',type=int,default=1)
     parser.add_argument('--drop_out', type=float, default=0.1)
-    parser.add_argument('--label_mask_prob',type=float,default=1)
+    parser.add_argument('--label_mask_prob',type=float,default=0.15)
     parser.add_argument('--features_mask_prob',type=float,default=0.15)
     parser.add_argument('--init_tradeoff',type=float,default=1)
     parser.add_argument('--batch_size',type=int,default=512)
@@ -68,9 +72,10 @@ def build_parser():
     parser.add_argument('--lr_scheduler',type=str,default='flat_then_anneal')
     parser.add_argument('--tradeoff_scheduler',type=str,default='cosine')
     parser.add_argument('--experiment',type=str,default=None)
-    parser.add_argument('--use_image_patcher',type=bool,default=False)
+    parser.add_argument('--use_image_patcher',type=bool,default=True)
     parser.add_argument('--image_n_patches',type = int,default=49)
     parser.add_argument('--model_image_n_channels',type= int,default=1)
+    parser.add_argument('--models_paths',type =str,default='/data/user-data/yehonatan-pe/runs/regular_runs_information/mnist/2021-12-12 17:29:04')
     return parser
 
 

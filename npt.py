@@ -13,11 +13,6 @@ class NPT(nn.Module):
     '''
     def __init__(self,encoded_data, layers, heads, rff_layers, device,drop_out = None):
         super(NPT, self).__init__()
-        # if image_patcher:
-        #     self.image_patcher = LinearImagePatcher(encoded_data)
-        # else:
-        #     self.input_embedding = Input_Embbeding(encoded_data,device)
-        # self.output_embedding = Output_Encoding(encoded_data, device)
         self.image_patcher = None
         self.network = nn.Sequential()
         self.ln = nn.LayerNorm(encoded_data.data.embedding_dim)

@@ -19,12 +19,6 @@ class Preprocessing():
         self.data = data
         self.split = data.split
         self.p = p
-        # self.target_col = data.target_col
-        # self.target_type = data.target_type
-        # self.categorical = data.categorical
-        # self.continuous = data.continuous
-        # self.embedding_dim = data.embedding_dim
-        # self.input_dim = data.input_dim
         self._preprocess()
 
     def _preprocess(self):

@@ -64,13 +64,8 @@ class Input_Embbeding(nn.Module):
             if to_encode.nelement() != 0:
                 encoded_col[ind] = F.one_hot(to_encode,num_classes = classes)
             encodings[col] = self.into_cat[str(col)](torch.cat((encoded_col, M[:, col].unsqueeze(dim=1).long()), dim=1).float())
-            #encodings[col] += self.index_embedding(torch.tensor(col).to(self.device)) + self.type_embedding(self.cat_index)
         for col in self.continuous:
             encodings[col] = self.into_cont[str(col)](torch.stack((X[:, col], M[:, col]), dim=1))
-            #encodings[col] += self.index_embedding(torch.tensor(col).to(self.device)) + self.type_embedding(self.cont_index)
-        # encodings_list = sorted([(key, item) for key, item in encodings.items()])
-        # encodings_list = [item[1] for item in encodings_list]
-        # return torch.stack(encodings_list, dim=1)
         return encodings
 
 
@@ -125,7 +120,9 @@ def permute(X,i):
     new_X = torch.cat((part_one_X,temp_x,part_two_X),dim=0)
     new_M = torch.zeros(new_X.shape)
     new_M[random_row, -1] = 1
-    return new_X,new_M,real_label
+    loss_indices = torch.zeros(X.size(0))
+    loss_indices[random_row] = 1
+    return new_X,new_M,loss_indices,real_label
 
 class gradient_clipper():
     def __init__(self,clip):
